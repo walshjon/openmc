@@ -1,104 +1,136 @@
 #!/usr/bin/env python
 
+from __future__ import division
+
 import random
 import struct
 import sys
 
+import numpy as np
+
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
+
+import vtk
 
 
 class Plot(object):
 
     def __init__(self):
-        self.segments = []
-        self.cells = set()
+        self.cells = {}
+
 
     def plot(self):
-        # Create axes
-        ax = plt.axes()
 
-        # Create polygon object for each particle track segment
-        for s in self.segments:
-            if s.cell == 0:
-                continue
-            ax.add_patch(s.polygon(self.pixel))
+        onlyPlotPoints = False
+        #onlyPlotPoints = True
 
-        # Set range of x- and y-axes
-        plt.axis([self.origin[0] - self.width[0]/2, self.origin[0] + self.width[0]/2,
-                  self.origin[1] - self.width[1]/2, self.origin[1] + self.width[1]/2])
+        if onlyPlotPoints:
+            fig = plt.figure()
+            ax = Axes3D(fig)
+            for cell,pts in self.cells.iteritems():
+                ax.scatter(*zip(*pts))
+            plt.show()
+            return
+        
 
-        # Display plot
-        plt.show()
+        ren = vtk.vtkRenderer()
+        renWin = vtk.vtkRenderWindow()
+        renWin.AddRenderer(ren)
+        iren = vtk.vtkRenderWindowInteractor()
+        iren.SetRenderWindow(renWin)
+        ren.SetBackground(1, 1, 1)
+
+        #writer = vtk.vtkXMLUnstructuredGridWriter()
+        writer = vtk.vtkXMLPolyDataWriter()
+        writer.SetFileName("output.vtp")
+        writer.SetNumberOfPieces(len(self.cells.keys()))
+
+        print dir(writer)
+
+        apd = vtk.vtkAppendPolyData()
+
+        c = 0
+        for cell,pts in self.cells.iteritems():
+
+            points = vtk.vtkPoints()
+            #scalars = vtk.vtkFloatArray()
+            for x,y,z in pts:
+                points.InsertNextPoint(x, y, z)
+                #scalars.InsertNextValue(0.0)
+
+            polydata = vtk.vtkPolyData()
+            polydata.SetPoints(points)
+            #polydata.GetPointData().SetScalars(scalars)
+            
+
+            # Construct the surface and create isosurface.ubun
+            surf = vtk.vtkSurfaceReconstructionFilter()
+            #surf.SetNeighborhoodSize(10)
+            #surf.SetSampleSpacing(0.5)
+            surf.SetInput(polydata)
+
+            cf = vtk.vtkContourFilter()
+            cf.SetInputConnection(surf.GetOutputPort())
+            #cf.SetInput(polydata)
+            cf.SetValue(0, 0.0)
+
+            # Sometimes the contouring algorithm can create a volume whose gradient
+            # vector and ordering of polygon (using the right hand rule) are
+            # inconsistent. vtkReverseSense cures this problem.
+            reverse = vtk.vtkReverseSense()
+            reverse.SetInputConnection(cf.GetOutputPort())
+            reverse.ReverseCellsOn()
+            reverse.ReverseNormalsOn()
+
+            map = vtk.vtkPolyDataMapper()
+            map.SetInputConnection(reverse.GetOutputPort())
+            map.ScalarVisibilityOff()
+
+            surfaceActor = vtk.vtkActor()
+            surfaceActor.SetMapper(map)
+            surfaceActor.GetProperty().SetDiffuseColor(1.0000, 0.3882, 0.2784)
+            surfaceActor.GetProperty().SetSpecularColor(1, 1, 1)
+            surfaceActor.GetProperty().SetSpecular(.4)
+            surfaceActor.GetProperty().SetSpecularPower(50)
+
+            delny = vtk.vtkDelaunay3D()
+            delny.SetInput(cf.GetOutput())
+            delny.SetTolerance(0.01)
+            #delny.SetAlpha(0.2)
+            #delny.BoundingTriangulationOff()
+
+            ren.AddActor(surfaceActor)
+
+            apd.AddInput(cf.GetOutput())
+
+            #writer.SetWritePiece(c)
+            #c += 1
+            #writer.SetInput(0,delny.GetOutput())
+            #writer.SetInput(0,cf.GetOutput())
+
+        writer.SetInput(0,apd.GetOutput())
+
+        writer.Write()
+
+        iren.Initialize()
+        renWin.Render()
+        iren.Start()
+
+
 
     def load_file(self, filename):
         # Create binary reader for plot.out file
         plotFile = BinaryReader(filename)
 
-        # Read plot origin, width, basis, and pixel width
-        self.origin = plotFile.get_double(3)
-        self.width = plotFile.get_double(2)
-        self.basis = plotFile.get_double(6)
-        self.pixel = plotFile.get_double()
-
-        # Determine bounding x coordinate
-        lastXCoord = self.origin[0] + self.width[0]/2
-
-        # Read initial starting coordinate (top-left)
-        startingCoord = plotFile.get_double(3)
-
         while True:
-            # Read next coordinate and cell
-            nextCoord = plotFile.get_double(3)
-            cell = plotFile.get_int()
-
-            # Add segment
-            thisSegment = Segment(startingCoord, nextCoord, cell)
-            self.segments.append(thisSegment)
-
-            # We also need a set of all the cells to convert to colors later
-            self.cells.add(cell)
-
-            # Set the starting coordinate for the next segment as the ending
-            # coordinate of the last segment
-            startingCoord = nextCoord
-
-            # If the ending coordinate is the bounding value, move to next
-            # horizontal ray
-            if nextCoord[0] == lastXCoord:
-                try:
-                    startingCoord = plotFile.get_double(3)
-                except BinaryReaderError:
-                    break
-
-        # Assign random colors to each cell
-        colorDict = {}
-        for c in self.cells:
-            # Cell 0 indicates a void, so assign white to that 
-            if c == 0:
-                color = (1,1,1,0)
-            else:
-                color = (random.random(),
-                         random.random(),
-                         random.random())
-            colorDict[c] = color
-
-        # Set the color of each segment
-        for s in self.segments:
-            s.color = colorDict[s.cell]
-
-
-class Segment(object):
-    def __init__(self, start, end, cell):
-        self.start = start
-        self.end = end
-        self.cell = cell
-
-    def polygon(self, pixel):
-        return plt.Polygon([[self.start[0], self.start[1] + pixel/2],
-                            [self.start[0], self.start[1] - pixel/2],
-                            [self.end[0], self.end[1] - pixel/2],
-                            [self.end[0], self.end[1] + pixel/2]],
-                           closed=True, color=self.color)
+            try:
+                cellId = plotFile.get_int(1)
+                self.cells[cellId] = []
+                for i in xrange(plotFile.get_int(1)):
+                    self.cells[cellId].append(plotFile.get_double(3))
+            except BinaryReaderError:
+                break
 
 
 class BinaryReader(object):
@@ -188,6 +220,7 @@ class BinaryReaderError(Exception):
 
     def __str__(self):
         return repr(self.msg)
+
 
 
 if __name__ == '__main__':
