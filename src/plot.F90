@@ -8,8 +8,8 @@ module plot
                               dict_has_key, dict_keys
   use geometry_header, only: Universe, BASE_UNIVERSE
   use global
-  use particle_header, only: Particle, initialize_particle, LocalCoord,      &
-                             deallocate_coord
+  use particle_header, only: LocalCoord, deallocate_coord
+  use source,          only: initialize_particle
 
   implicit none
 
@@ -24,8 +24,8 @@ contains
     !TODO: deal with cell universes
 
     call find_cell_pointclouds(0)
-    call find_cell_pointclouds(1)
-    call find_cell_pointclouds(2)
+    !call find_cell_pointclouds(1)
+    !call find_cell_pointclouds(2)
 
     call dump_point_cloud()
     !call dump_cell_quadrics()
@@ -59,7 +59,6 @@ contains
     logical :: found_cell      ! found cell which particle is in?
     type(Cell),       pointer :: c    => null()
     type(Universe),   pointer :: univ => null()
-    type(Particle),   pointer :: p    => null()
     type(LocalCoord), pointer :: coord => null()
 
     if (basis == 0 ) then
@@ -107,17 +106,17 @@ contains
       do while(xyz(innerI) > last_inner_coord)
 
          ! initialize the particle and set starting coordinate and direction
-         call initialize_particle(p)
+         call initialize_particle()
 
          p % coord % xyz = xyz
          p % coord % uvw = direction
 
          ! Find cell that particle is currently in
-         call find_cell(p, found_cell)
+         call find_cell(found_cell)
 
          if (found_cell) then
             c => cells(p % coord0 % cell)
-            call add_pointcloud_point(c,p)
+            call add_pointcloud_point(c)
          end if
 
          ! =======================================================================
@@ -134,7 +133,7 @@ contains
                p % coord0 % xyz = xyz
                p % coord0 % cell = univ % cells(i)
 
-               call distance_to_boundary(p, d, surface_crossed, lattice_crossed)
+               call distance_to_boundary(d, surface_crossed, lattice_crossed)
                if (d < distance) then
                   ! Check to make sure particle is actually going into this cell
                   ! by moving it slightly forward and seeing if the cell contains
@@ -143,7 +142,7 @@ contains
                   p % coord0 % xyz = p % coord0 % xyz + (d + TINY_BIT) * p % coord0 % uvw
 
                   c => cells(p % coord0 % cell)
-                  if (.not. cell_contains(c, p)) cycle
+                  if (.not. cell_contains(c)) cycle
 
                   last_cell = p % coord0 % cell
                   ! Set new distance and retain pointer to this cell
@@ -165,12 +164,12 @@ contains
             ! Write coordinate where next cell begins
             p % coord0 % xyz = xyz + distance * p % coord0 % uvw
             c => cells(last_cell)
-            call add_pointcloud_point(c,p)
+            call add_pointcloud_point(c)
 
             ! Process surface crossing for next cell
             p % coord0 % cell = NONE
             p % surface = -enter_surface
-            call cross_surface(p, NONE)
+            call cross_surface(NONE)
          end if ! end if (.not. found_cell)
 
          ! =======================================================================
@@ -180,8 +179,11 @@ contains
             ! save particle's current cell
             last_cell = p % coord % cell
 
+            c => cells(last_cell)
+            call add_pointcloud_point(c)
+
             ! Calculate distance to next boundary
-            call distance_to_boundary(p, distance, surface_crossed, lattice_crossed)
+            call distance_to_boundary(distance, surface_crossed, lattice_crossed)
 
             ! Advance particle
             coord => p % coord0
@@ -201,24 +203,26 @@ contains
                 p % coord % cell = 0
               else
                 c => cells(last_cell)
-                call add_pointcloud_point(c,p) !causes two of the edge points
+                call add_pointcloud_point(c)
               end if
 
               cycle
             end if ! end if (p % coord0 % xyz(1) >= last_track_coord)
 
             c => cells(last_cell)
-            call add_pointcloud_point(c,p)
+            call add_pointcloud_point(c)
 
             p % coord % cell = 0
             if (lattice_crossed /= NONE) then
                p % surface = NONE
-               call cross_lattice(p, lattice_crossed)
+               call cross_lattice(lattice_crossed)
             else
                p % surface = surface_crossed
-               call cross_surface(p, last_cell)
+               call cross_surface(last_cell)
 
                if (surfaces(abs(surface_crossed)) % bc /= BC_TRANSMIT) then
+                  c => cells(last_cell)
+                  call add_pointcloud_point(c)
                   exit
                end if
             end if
@@ -254,10 +258,9 @@ contains
 !===============================================================================
 ! add_pointcloud_point
 !===============================================================================
-  subroutine add_pointcloud_point(c,p)
+  subroutine add_pointcloud_point(c)
 
     type(Cell),       pointer :: c
-    type(Particle),   pointer :: p
 
     integer :: i
 
@@ -271,7 +274,7 @@ contains
     if (c%n_points >=100000 ) return
     c%pointcloud(c%n_points)%xyz = p%coord0%xyz
 
-    call update_cell_limits(c,p)
+    call update_cell_limits(c)
 
   end subroutine add_pointcloud_point
 
@@ -279,10 +282,9 @@ contains
 !===============================================================================
 ! UPDATE_CELL_LIMITS
 !===============================================================================
-  subroutine update_cell_limits(c,p)
+  subroutine update_cell_limits(c)
 
     type(Cell),       pointer :: c
-    type(Particle),   pointer :: p
 
     integer :: i
 

@@ -610,7 +610,7 @@ contains
              ! the cell.  TINY_BIT wasn't enough to flip the sense in some cases
              p % coord % xyz = p % coord % xyz + 5*TINY_BIT * p % coord % uvw
              p % surface = NONE
-             if (.not. cell_contains(cl, p)) then
+             if (.not. cell_contains(cl)) then
                 p % coord % xyz = p % coord % xyz - 5*TINY_BIT * p % coord % uvw
                 p % surface = index_surf
                 dist = 0

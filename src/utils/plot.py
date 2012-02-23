@@ -8,8 +8,7 @@ import sys
 
 import numpy as np
 
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
+
 
 import vtk
 
@@ -23,16 +22,20 @@ class Plot(object):
     def plot(self):
 
         onlyPlotPoints = False
-        #onlyPlotPoints = True
+        onlyPlotPoints = True
 
+        """ 
         if onlyPlotPoints:
+            #mpl points - can be slow
+            from mpl_toolkits.mplot3d import Axes3D
+            import matplotlib.pyplot as plt
             fig = plt.figure()
             ax = Axes3D(fig)
             for cell,pts in self.cells.iteritems():
                 ax.scatter(*zip(*pts))
             plt.show()
             return
-        
+        """
 
         ren = vtk.vtkRenderer()
         renWin = vtk.vtkRenderWindow()
@@ -46,8 +49,6 @@ class Plot(object):
         writer.SetFileName("output.vtp")
         writer.SetNumberOfPieces(len(self.cells.keys()))
 
-        print dir(writer)
-
         apd = vtk.vtkAppendPolyData()
 
         c = 0
@@ -59,55 +60,81 @@ class Plot(object):
                 points.InsertNextPoint(x, y, z)
                 #scalars.InsertNextValue(0.0)
 
-            polydata = vtk.vtkPolyData()
-            polydata.SetPoints(points)
-            #polydata.GetPointData().SetScalars(scalars)
+            pointPolyData = vtk.vtkPolyData()
+            pointPolyData.SetPoints(points)
+            #pointPolyData.GetPointData().SetScalars(scalars)
             
+            if onlyPlotPoints:
+        
+                ptMask = vtk.vtkMaskPoints()
+                ptMask.SetInput(pointPolyData)
 
-            # Construct the surface and create isosurface.ubun
-            surf = vtk.vtkSurfaceReconstructionFilter()
-            #surf.SetNeighborhoodSize(10)
-            #surf.SetSampleSpacing(0.5)
-            surf.SetInput(polydata)
+                sphere = vtk.vtkSphereSource()
+                sphere.SetRadius(0.1)
+                #sphere.SetResolution(6)
 
-            cf = vtk.vtkContourFilter()
-            cf.SetInputConnection(surf.GetOutputPort())
-            #cf.SetInput(polydata)
-            cf.SetValue(0, 0.0)
+                # vtkGlyph3D takes two inputs: the input point set (SetInput) which can be
+                # any vtkDataSet; and the glyph (SetSource) which must be a vtkPolyData.
+                glyph = vtk.vtkGlyph3D()
+                glyph.SetInputConnection(ptMask.GetOutputPort())
+                glyph.SetSource(sphere.GetOutput())
+                #glyph.SetVectorModeToUseNormal()
+                #glyph.SetScaleModeToScaleByVector()
+                #glyph.SetScaleFactor(0.004)
+                pointMapper = vtk.vtkPolyDataMapper()
+                pointMapper.SetInputConnection(glyph.GetOutputPort())
+                pointActor = vtk.vtkActor()
+                pointActor.SetMapper(pointMapper)
+                pointActor.GetProperty().SetColor(0.0, 0.79, 0.34)
 
-            # Sometimes the contouring algorithm can create a volume whose gradient
-            # vector and ordering of polygon (using the right hand rule) are
-            # inconsistent. vtkReverseSense cures this problem.
-            reverse = vtk.vtkReverseSense()
-            reverse.SetInputConnection(cf.GetOutputPort())
-            reverse.ReverseCellsOn()
-            reverse.ReverseNormalsOn()
+                ren.AddActor(pointActor)
+                apd.AddInput(glyph.GetOutput())
 
-            map = vtk.vtkPolyDataMapper()
-            map.SetInputConnection(reverse.GetOutputPort())
-            map.ScalarVisibilityOff()
 
-            surfaceActor = vtk.vtkActor()
-            surfaceActor.SetMapper(map)
-            surfaceActor.GetProperty().SetDiffuseColor(1.0000, 0.3882, 0.2784)
-            surfaceActor.GetProperty().SetSpecularColor(1, 1, 1)
-            surfaceActor.GetProperty().SetSpecular(.4)
-            surfaceActor.GetProperty().SetSpecularPower(50)
+            else:
+                # Construct the surface and create isosurface
+                surf = vtk.vtkSurfaceReconstructionFilter()
+                #surf.SetNeighborhoodSize(10)
+                #surf.SetSampleSpacing(0.5)
+                surf.SetInput(pointPolyData)
 
-            delny = vtk.vtkDelaunay3D()
-            delny.SetInput(cf.GetOutput())
-            delny.SetTolerance(0.01)
-            #delny.SetAlpha(0.2)
-            #delny.BoundingTriangulationOff()
+                cf = vtk.vtkContourFilter()
+                cf.SetInputConnection(surf.GetOutputPort())
+                #cf.SetInput(pointPolyData)
+                cf.SetValue(0, 0.0)
 
-            ren.AddActor(surfaceActor)
+                # Sometimes the contouring algorithm can create a volume whose gradient
+                # vector and ordering of polygon (using the right hand rule) are
+                # inconsistent. vtkReverseSense cures this problem.
+                reverse = vtk.vtkReverseSense()
+                reverse.SetInputConnection(cf.GetOutputPort())
+                reverse.ReverseCellsOn()
+                reverse.ReverseNormalsOn()
 
-            apd.AddInput(cf.GetOutput())
+                map = vtk.vtkPolyDataMapper()
+                map.SetInputConnection(reverse.GetOutputPort())
+                map.ScalarVisibilityOff()
 
-            #writer.SetWritePiece(c)
-            #c += 1
-            #writer.SetInput(0,delny.GetOutput())
-            #writer.SetInput(0,cf.GetOutput())
+                surfaceActor = vtk.vtkActor()
+                surfaceActor.SetMapper(map)
+                surfaceActor.GetProperty().SetDiffuseColor(1.0000, 0.3882, 0.2784)
+                surfaceActor.GetProperty().SetSpecularColor(1, 1, 1)
+                surfaceActor.GetProperty().SetSpecular(.4)
+                surfaceActor.GetProperty().SetSpecularPower(50)
+
+                #delny = vtk.vtkDelaunay3D()
+                #delny.SetInput(cf.GetOutput())
+                #delny.SetTolerance(0.01)
+                #delny.SetAlpha(0.2)
+                #delny.BoundingTriangulationOff()
+
+                ren.AddActor(surfaceActor)
+                apd.AddInput(reverse.GetOutput())
+
+                #writer.SetWritePiece(c)
+                #c += 1
+                #writer.SetInput(0,delny.GetOutput())
+                #writer.SetInput(0,cf.GetOutput())
 
         writer.SetInput(0,apd.GetOutput())
 
