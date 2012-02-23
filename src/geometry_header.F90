@@ -2,6 +2,10 @@ module geometry_header
 
   implicit none
 
+  type point
+    real(8) :: xyz(3)
+  end type point
+
 !===============================================================================
 ! UNIVERSE defines a geometry that fills all phase space
 !===============================================================================
@@ -64,6 +68,9 @@ module geometry_header
           & surfaces(:)    ! List of surfaces bounding cell -- note that
                            ! parentheses, union, etc operators will be listed
                            ! here too
+     real(8), allocatable     :: limits(:) ! xmin,ymin,zmin,zmax,ymax,zmax bounds
+     type(point), allocatable :: pointcloud(:) ! points on cell surface
+     integer                  :: n_points ! number of points in pointcloud
   end type Cell
 
   ! array index of universe 0

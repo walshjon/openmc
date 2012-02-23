@@ -603,13 +603,28 @@ contains
           y = coord % xyz(2)
           z = coord % xyz(3)
 
-          ! check for coincident surface -- note that we can't skip the
-          ! calculation in general because a particle could be on one side of a
-          ! cylinder and still have a positive distance to the other
+          ! check for coincident surface -- note that unless we're on a tangent
+          ! we can't skip the calculation in general because a particle could
+          ! be on one side of a ylinder and still have a positive distance to
+          ! the other
 
           index_surf = cl % surfaces(i)
           if (index_surf == p % surface) then
              on_surface = .true.
+             ! check for tangent by advancing enough to check if we're still in
+             ! the cell.  TINY_BIT wasn't enough to flip the sense in some cases
+             p % coord % xyz = p % coord % xyz + 5*TINY_BIT * p % coord % uvw
+             p % surface = NONE
+             if (.not. cell_contains(cl, p)) then
+                p % coord % xyz = p % coord % xyz - 5*TINY_BIT * p % coord % uvw
+                p % surface = index_surf
+                dist = 0
+                surface_crossed = -cl%surfaces(i)
+                lattice_crossed = NONE ! we're never tangent to a lattice, right?
+                exit
+             end if
+             p % coord0 % xyz = p % coord0 % xyz - 5*TINY_BIT * p % coord0 % uvw
+             p % surface = index_surf
           else
              on_surface = .false.
           end if

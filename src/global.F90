@@ -51,6 +51,7 @@ module global
   type(DictionaryII), pointer :: material_dict => null()
   type(DictionaryII), pointer :: mesh_dict     => null()
   type(DictionaryII), pointer :: tally_dict    => null()
+  type(DictionaryII), pointer :: plot_cells_dict=> null()
 
   ! ============================================================================
   ! CROSS SECTION RELATED VARIABLES
@@ -174,9 +175,11 @@ module global
 
   logical :: plotting = .false.
   real(8) :: plot_origin(3)
-  real(8) :: plot_width(2)
+  real(8) :: plot_width(3)
   real(8) :: plot_basis(6)
   real(8) :: pixel
+  real(8) :: plot_aspect
+  integer :: plot_resolution(3)
 
   ! ============================================================================
   ! HDF5 VARIABLES

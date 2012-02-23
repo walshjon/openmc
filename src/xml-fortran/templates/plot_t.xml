@@ -7,5 +7,7 @@
   <variable name="width_" tag="width" type="double-array" />
   <variable name="basis_" tag="basis" type="word" length="3" default="'xy'" />
   <variable name="pixel_" tag="pixel" type="double" default="0.01" />
+  <variable name="aspect_" tag="aspect" type="double" default="0.1" />
+  <variable name="resolution_" tag="resolution" type="integer-array" />
 
 </template>

@@ -1117,8 +1117,13 @@ contains
     end if
 
     ! Copy plotting width
-    if (size(width_) == 2) then
+    if (size(width_) == 3) then
        plot_width = width_
+    end if
+
+    ! Copy plotting resolution
+    if (size(resolution_) == 3) then
+       plot_resolution = resolution_
     end if
 
     ! Read basis
@@ -1133,6 +1138,9 @@ contains
 
     ! Read pixel width
     pixel = pixel_
+
+    ! Read aspect
+    plot_aspect = aspect_
 
   end subroutine read_plot_xml
 

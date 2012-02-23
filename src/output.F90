@@ -903,7 +903,7 @@ contains
 
     ! Print plotting width
     write(ou,100) "Plotting Width:", trim(to_str(plot_width(1))) // &
-         " " // trim(to_str(plot_width(2)))
+         " " // trim(to_str(plot_width(2))) // " " // trim(to_str(plot_width(3)))
 
     ! Print pixel width
     write(ou,100) "Pixel Width:", trim(to_str(pixel))

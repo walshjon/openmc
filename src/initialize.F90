@@ -281,6 +281,7 @@ contains
     call dict_create(xs_listing_dict)
     call dict_create(nuclide_dict)
     call dict_create(sab_dict)
+    call dict_create(plot_cells_dict)
 
     ! Create special dictionary used in input_xml
     call dict_create(cells_in_univ_dict)
