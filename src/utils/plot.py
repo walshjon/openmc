@@ -53,15 +53,26 @@ class Plot(object):
 
         c = 0
         for cell,pts in self.cells.iteritems():
-
+            print "Plotting {0} points...".format(len(pts))
             points = vtk.vtkPoints()
-            #scalars = vtk.vtkFloatArray()
-            for x,y,z in pts:
-                points.InsertNextPoint(x, y, z)
-                #scalars.InsertNextValue(0.0)
+            ptVerts = vtk.vtkCellArray()
+            cellData = vtk.vtkDoubleArray()
+            cellData2 = vtk.vtkDoubleArray()
+            cellData.SetName("openmc cell")
+            cellData2.SetName("data array2")
+
+            for i,(x,y,z) in enumerate(pts):
+                points.InsertPoint(i,x, y, z)
+                ptVerts.InsertNextCell(1)
+                ptVerts.InsertCellPoint(i)
+                cellData.InsertNextValue(cell)
+                cellData2.InsertNextValue(i)
 
             pointPolyData = vtk.vtkPolyData()
             pointPolyData.SetPoints(points)
+            pointPolyData.GetPointData().SetScalars(cellData)
+            pointPolyData.GetPointData().AddArray(cellData2)
+            pointPolyData.SetVerts(ptVerts)
             #pointPolyData.GetPointData().SetScalars(scalars)
             
             if onlyPlotPoints:
@@ -80,7 +91,7 @@ class Plot(object):
                 glyph.SetSource(sphere.GetOutput())
                 #glyph.SetVectorModeToUseNormal()
                 #glyph.SetScaleModeToScaleByVector()
-                #glyph.SetScaleFactor(0.004)
+                glyph.SetScaleFactor(2.0)
                 pointMapper = vtk.vtkPolyDataMapper()
                 pointMapper.SetInputConnection(glyph.GetOutputPort())
                 pointActor = vtk.vtkActor()
@@ -88,7 +99,8 @@ class Plot(object):
                 pointActor.GetProperty().SetColor(0.0, 0.79, 0.34)
 
                 ren.AddActor(pointActor)
-                apd.AddInput(glyph.GetOutput())
+                #apd.AddInput(glyph.GetOutput())
+                apd.AddInput(pointPolyData)
 
 
             else:
@@ -140,9 +152,9 @@ class Plot(object):
 
         writer.Write()
 
-        iren.Initialize()
-        renWin.Render()
-        iren.Start()
+        #iren.Initialize()
+        #renWin.Render()
+        #iren.Start()
 
 
 

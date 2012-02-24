@@ -70,7 +70,7 @@ module geometry_header
                            ! here too
      real(8), allocatable     :: limits(:) ! xmin,ymin,zmin,zmax,ymax,zmax bounds
      type(point), allocatable :: pointcloud(:) ! points on cell surface
-     integer                  :: n_points ! number of points in pointcloud
+     integer                  :: n_points = 0 ! number of points in pointcloud
   end type Cell
 
   ! array index of universe 0

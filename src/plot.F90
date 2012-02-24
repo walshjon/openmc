@@ -3,7 +3,7 @@ module plot
   use constants
   use error,           only: fatal_error
   use geometry,        only: find_cell, distance_to_boundary, cross_surface, &
-                             cross_lattice, cell_contains
+                             cross_lattice, cell_contains, on_cell_surf
   use datatypes,       only: dict_create, dict_add_key, dict_get_key,         &
                               dict_has_key, dict_keys
   use geometry_header, only: Universe, BASE_UNIVERSE
@@ -24,13 +24,11 @@ contains
     !TODO: deal with cell universes
 
     call find_cell_pointclouds(0)
-    !call find_cell_pointclouds(1)
-    !call find_cell_pointclouds(2)
+    call find_cell_pointclouds(1)
+    call find_cell_pointclouds(2)
 
     call dump_point_cloud()
     !call dump_cell_quadrics()
-
-
 
   end subroutine run_plot
 
@@ -43,26 +41,26 @@ contains
 
     integer, intent(in) :: basis ! sweep direction 0: xy, 1: xz, 2: yz
 
-    integer :: i,n             ! indices
     real(8) :: direction(3)    ! sweep direction
-    integer :: outerI, innerI  ! index of xyz for outer and inner sweeps
+    integer :: outerI, innerI, trackI  ! index of xyz for outer, inner, and track sweeps
+    integer :: enter_surface   ! entrance surface
     integer :: surface_crossed ! surface which particle is on
     integer :: lattice_crossed ! is surface crossing in lattice?
     integer :: last_cell       ! most recent cell particle was in
-    integer :: enter_surface   ! entrance surface
     real(8) :: xyz(3)          ! starting coordinates
     real(8) :: last_track_coord    ! bounding x coordinate
     real(8) :: last_inner_coord    ! bounding y coordinate
     real(8) :: last_outer_coord! bounding z coordinate
-    real(8) :: d               ! distance to boundary
     real(8) :: distance        ! distance particle travels
     logical :: found_cell      ! found cell which particle is in?
     type(Cell),       pointer :: c    => null()
-    type(Universe),   pointer :: univ => null()
     type(LocalCoord), pointer :: coord => null()
+
+
 
     if (basis == 0 ) then
       direction = (/ 1, 0, 0 /)
+      trackI = 1 ! x
       innerI = 2 ! y
       outerI = 3 ! z
       ! Determine bounding x and y coordinates for plot
@@ -74,6 +72,7 @@ contains
       last_outer_coord = plot_origin(3) - plot_width(3) / 2.0
     else if (basis == 1) then
       direction = (/ 0, 1, 0 /)
+      trackI = 2 ! y
       innerI = 1 ! x
       outerI = 3 ! z
       ! Determine bounding x and y coordinates for plot
@@ -85,6 +84,7 @@ contains
       last_outer_coord = plot_origin(3) - plot_width(3) / 2.0
     else if (basis == 2) then
       direction = (/ 0, 0, 1 /)
+      trackI = 3 ! z
       innerI = 2 ! y 
       outerI = 1 ! x
       ! Determine bounding x and y coordinates for plot
@@ -101,9 +101,11 @@ contains
     ! allocate and initialize particle
     allocate(p)
 
-    do while(xyz(outerI) > last_outer_coord)
+    do while(xyz(outerI) >= last_outer_coord)
       ! loop over horizontal rays
-      do while(xyz(innerI) > last_inner_coord)
+      do while(xyz(innerI) >= last_inner_coord)
+
+         write(*,*)"starting ray at ",xyz
 
          ! initialize the particle and set starting coordinate and direction
          call initialize_particle()
@@ -123,37 +125,13 @@ contains
          ! MOVE PARTICLE FORWARD TO NEXT CELL
 
          if (.not. found_cell) then
-            ! Clear any coordinates beyond first level
-            call deallocate_coord(p % coord0 % next)
-            p % coord => p % coord0
 
-            distance = INFINITY
-            univ => universes(BASE_UNIVERSE)
-            do i = 1, univ % n_cells
-               p % coord0 % xyz = xyz
-               p % coord0 % cell = univ % cells(i)
-
-               call distance_to_boundary(d, surface_crossed, lattice_crossed)
-               if (d < distance) then
-                  ! Check to make sure particle is actually going into this cell
-                  ! by moving it slightly forward and seeing if the cell contains
-                  ! that coordinate
-
-                  p % coord0 % xyz = p % coord0 % xyz + (d + TINY_BIT) * p % coord0 % uvw
-
-                  c => cells(p % coord0 % cell)
-                  if (.not. cell_contains(c)) cycle
-
-                  last_cell = p % coord0 % cell
-                  ! Set new distance and retain pointer to this cell
-                  distance = d
-                  enter_surface = surface_crossed
-               end if
-            end do
+            call track_through_void(distance, enter_surface, xyz)
 
             ! No cell was found on this horizontal ray
             if (distance == INFINITY) then
-               p % coord0 % xyz(1) = last_track_coord
+
+               p % coord0 % xyz(trackI) = last_track_coord
 
                ! Move to next ray start position
                xyz(innerI) = xyz(innerI) - plot_aspect
@@ -161,29 +139,57 @@ contains
                cycle
             end if
 
-            ! Write coordinate where next cell begins
+            ! Advance particle to surface
             p % coord0 % xyz = xyz + distance * p % coord0 % uvw
-            c => cells(last_cell)
-            call add_pointcloud_point(c)
 
             ! Process surface crossing for next cell
             p % coord0 % cell = NONE
             p % surface = -enter_surface
             call cross_surface(NONE)
-         end if ! end if (.not. found_cell)
+
+         end if
 
          ! =======================================================================
          ! MOVE PARTICLE ACROSS HORIZONTAL TRACK
 
          do while (p % alive)
-            ! save particle's current cell
-            last_cell = p % coord % cell
+            write(*,*)"at:",p % coord0 % xyz
+            write(*,*)"in:",p % coord % cell
 
-            c => cells(last_cell)
-            call add_pointcloud_point(c)
+            if (p % coord % cell == 0) then
+              message = "Voids inside the plotting area, or bad boundary conditions."
+              call fatal_error()
 
-            ! Calculate distance to next boundary
-            call distance_to_boundary(distance, surface_crossed, lattice_crossed)
+              !call track_through_void(distance, enter_surface, p % coord % xyz)
+
+              ! No cell was found on this horizontal ray
+              !if (distance == INFINITY) then
+              !   exit
+              !end if
+
+              ! Write coordinate where next cell begins
+              !write(*,*)"moving: ",p % coord % xyz, distance
+              !p % coord0 % xyz = p % coord % xyz + distance * p % coord % uvw
+              !write(*,*)"   about to add ",p % coord0 % xyz
+              !c => cells(p % coord0 % cell)
+              !call add_pointcloud_point(c)
+
+              ! Process surface crossing for next cell
+              !p % coord0 % cell = NONE
+              !p % surface = -enter_surface
+              !call cross_surface(NONE)
+              !write(*,*)"here"
+              !cycle
+
+            else
+
+              c => cells(p % coord % cell)
+              call add_pointcloud_point(c)
+
+              ! save particle's current cell
+              last_cell = p % coord % cell
+              call distance_to_boundary(distance, surface_crossed, lattice_crossed)
+            end if
 
             ! Advance particle
             coord => p % coord0
@@ -194,22 +200,18 @@ contains
 
             ! If next boundary crossing is out of range of the plot, only include
             ! the visible portion and move to next horizontal ray
-            if (p % coord0 % xyz(1) >= last_track_coord) then
+            if (p % coord0 % xyz(trackI) >= last_track_coord) then
               p % alive = .false.
-              p % coord0 % xyz(1) = last_track_coord
+              p % coord0 % xyz(trackI) = last_track_coord
 
-              ! If there is no cell beyond this boundary, mark it as cell 0
-              if (distance == INFINITY) then
-                p % coord % cell = 0
-              else
-                c => cells(last_cell)
-                call add_pointcloud_point(c)
-              end if
+              !c => cells(last_cell)
+              !call add_pointcloud_point(c)
 
-              cycle
-            end if ! end if (p % coord0 % xyz(1) >= last_track_coord)
+              exit
 
-            c => cells(last_cell)
+            end if
+
+            c => cells(p % coord % cell)
             call add_pointcloud_point(c)
 
             p % coord % cell = 0
@@ -219,18 +221,22 @@ contains
             else
                p % surface = surface_crossed
                call cross_surface(last_cell)
-
+                write(*,*)"SURFACE",surface_crossed
                if (surfaces(abs(surface_crossed)) % bc /= BC_TRANSMIT) then
-                  c => cells(last_cell)
-                  call add_pointcloud_point(c)
                   exit
+                  !c => cells(last_cell)
+                  !call add_pointcloud_point(c)
+
                end if
             end if
+
 
          end do ! (end do while particle is alive)
 
          ! Move y-coordinate to next ray start position
          xyz(innerI) = xyz(innerI) - plot_aspect
+
+
       end do
 
       if (basis == 0) then
@@ -252,8 +258,65 @@ contains
 
     end do
 
-
   end subroutine find_cell_pointclouds
+
+!===============================================================================
+! track_through_void
+!===============================================================================
+  subroutine track_through_void(distance, enter_surface, xyz)
+
+    real(8), intent(inout) :: distance        ! distance particle travels
+    integer, intent(inout) :: enter_surface   ! entrance surface
+    real(8), intent(in)    :: xyz(3)          ! starting coordinates
+
+    integer :: i               ! indices
+    integer :: surface_crossed ! surface which particle is on
+    integer :: lattice_crossed ! is surface crossing in lattice?
+    integer :: last_cell       ! most recent cell particle was in
+    real(8) :: d               ! distance to boundary
+
+    type(Cell),       pointer :: c    => null()
+    type(Universe),   pointer :: univ => null()
+
+    write(*,*)"searching from void p:",xyz
+    write(*,*)"along ",p % coord0 % uvw
+
+    ! Clear any coordinates beyond first level
+    call deallocate_coord(p % coord0 % next)
+    p % coord => p % coord0
+
+    last_cell = 0
+    enter_surface = NONE
+    distance = INFINITY
+    univ => universes(BASE_UNIVERSE)
+    do i = 1, univ % n_cells
+       p % coord0 % xyz = xyz
+       p % coord0 % cell = univ % cells(i)
+
+       call distance_to_boundary(d, surface_crossed, lattice_crossed)
+       if (d < distance) then
+          ! Check to make sure particle is actually going into this cell
+          c => cells(p % coord0 % cell)
+          p % coord0 % xyz = p % coord0 % xyz + d * p % coord0 % uvw
+
+          if (.not. on_cell_surf(c,p % coord0 % xyz)) cycle
+
+          last_cell = p % coord0 % cell
+          ! Set new distance and retain pointer to this cell
+          distance = d
+          enter_surface = surface_crossed
+       end if
+    end do
+
+    write(*,*)"found dist",distance
+
+    p % coord0 % cell = last_cell
+    p % coord0 % xyz = xyz
+    p % coord % xyz = xyz
+
+
+
+  end subroutine track_through_void
 
 !===============================================================================
 ! add_pointcloud_point
@@ -262,16 +325,18 @@ contains
 
     type(Cell),       pointer :: c
 
-    integer :: i
-
-    call dict_add_key(plot_cells_dict,p % coord % cell,p % coord % cell)
+    call dict_add_key(plot_cells_dict,c%id,c%id)
     if (.not. allocated(c%pointcloud)) then
       allocate(c%pointcloud(100000))
-      c%n_points = 1
-    else
-      c%n_points = c%n_points + 1
-    endif
-    if (c%n_points >=100000 ) return
+    end if
+    c%n_points = c%n_points + 1
+
+    if (c%n_points > 100000 ) return
+
+    write(*,*)c%id
+    write(*,*)"adding ",c%n_points,p%coord0%xyz
+    write(*,*)""
+
     c%pointcloud(c%n_points)%xyz = p%coord0%xyz
 
     call update_cell_limits(c)
@@ -288,7 +353,7 @@ contains
 
     integer :: i
 
-    call dict_add_key(plot_cells_dict,p % coord % cell,p % coord % cell)
+    call dict_add_key(plot_cells_dict,c%id,c%id)
     if (.not. allocated(c%limits)) then
       allocate(c%limits(6))
       do i=1,3
@@ -322,15 +387,18 @@ contains
     open(UNIT=UNIT_PLOT, FILE=path_plot, STATUS="replace", ACCESS="stream")
 
     do n=1,n_cells
-      if (dict_has_key(plot_cells_dict,n)) then
+      write(*,*)"checking cell",cells(n)%id
+      if (dict_has_key(plot_cells_dict,cells(n)%id)) then
+        write(*,*)"    dumping cell ",cells(n)%id
+        write(*,*)"        n_points",cells(n)%n_points
         write(UNIT=UNIT_PLOT) cells(n)%id
         write(UNIT=UNIT_PLOT) cells(n)%n_points
         do t=1,cells(n)%n_points
+          !write(*,*)"            p:",cells(n)%pointcloud(t)
           write(UNIT=UNIT_PLOT) cells(n)%pointcloud(t)
         end do
       end if
     end do
-
     ! Close plot file
     close(UNIT=UNIT_PLOT)
 
@@ -340,7 +408,7 @@ contains
 ! DUMP_CELL_QUADRICS
 !===============================================================================
   subroutine dump_cell_quadrics()
-    integer :: n,s,i             ! indices
+    integer :: n,s            ! indices
     type(Cell),       pointer :: c    => null()
     type(Surface), pointer      :: surf => null()
     
@@ -351,8 +419,8 @@ contains
     open(UNIT=UNIT_PLOT, FILE=path_plot, STATUS="replace", ACCESS="stream")
 
     do n=1,n_cells
-      if (dict_has_key(plot_cells_dict,n)) then
-          c => cells(n)
+      c => cells(n)
+      if (dict_has_key(plot_cells_dict,c%id)) then
           write(UNIT=UNIT_PLOT)c%id
           write(UNIT=UNIT_PLOT)c%limits
           write(UNIT=UNIT_PLOT)c%n_surfaces

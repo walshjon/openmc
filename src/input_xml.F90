@@ -281,6 +281,7 @@ contains
        end if
 
        ! Allocate array for surfaces and copy
+       ! TODO: check validity of parentheses
        n = size(cell_(i) % surfaces)
        c % n_surfaces = n
        allocate(c % surfaces(n))

@@ -24,8 +24,7 @@ contains
     logical                 :: in_cell
 
     integer, allocatable :: expression(:) ! copy of surfaces list
-    integer :: specified_sense ! specified sense of surface in list
-    integer :: actual_sense    ! sense of particle wrt surface
+    real(8) :: val             ! evaluation of F(x,y,z)
     integer :: n_surf          ! number of surfaces in cell
     integer :: i               ! index of surfaces in cell
     integer :: surf_num        ! index in surfaces array (with sign)
@@ -60,14 +59,12 @@ contains
        end if
 
        ! Compare sense of point to specified sense
-       specified_sense = sign(1,expression(i))
-       actual_sense = sense(surf, p % coord % xyz)
-       if (actual_sense == specified_sense) then
+       val = -1.0_8*dble(sign(1,expression(i)))*quad_eval(surf,p % coord % xyz)
+       if (val <= 0.0_8) then
           expression(i) = 1
        else
           expression(i) = 0
        end if
-
     end do
 
     ! TODO: Need to replace this with a 'lgeval' like subroutine that can
@@ -82,6 +79,81 @@ contains
     deallocate(expression)
 
   end function cell_contains
+
+
+!===============================================================================
+! ON_CELL_SURF checks if the coordinates of a particle are in fact on the
+! outer surface of the specified cell.  For intersections you take the max of
+! each F(x,y,z), and for unions you take the min.  For difference, it's
+! max[F_1(x,y,z), -F_2(x,y,z)]
+!===============================================================================
+  function on_cell_surf(c,xyz) result(on_surf)
+
+    type(Cell),       pointer :: c
+    real(8),intent(in)        :: xyz(3)  ! coordinates of particle
+    logical                   :: on_surf
+
+    real(8), allocatable :: expression(:) ! copy of surfaces list
+    integer :: n_surf          ! number of surfaces in cell
+    integer :: i               ! index of surfaces in cell
+    integer :: current_surface ! current surface of particle (with sign)
+    real(8) :: maxQuadVal      ! maximum quad_eval of each 
+    type(Surface), pointer  :: surf => null()
+
+    ! We'll assume that if the particles surface was set, it really is true
+    current_surface = p % surface
+    if (current_surface /= NONE) then
+      on_surf = .true.
+      return
+    end if
+
+    ! Make copy of surface list and save evaluations
+    n_surf = size(c % surfaces)
+    allocate(expression(n_surf))
+    do i = 1, n_surf
+       ! Don't change logical operator
+       if (expression(i) >= OP_DIFFERENCE) then
+          cycle
+       end if
+       surf => surfaces(abs(c%surfaces(i)))
+       expression(i) = -1.0_8*dble(sign(1,c%surfaces(i)))*quad_eval(surf, xyz)
+    end do
+
+    ! Evaluate boolean implicit function
+    do i = 1, n_surf
+      select case (c%surfaces(i))
+        case (OP_LEFT_PAREN)
+          message = "In cell "//trim(to_str(c%id))// ", parentheses not implemented"
+          call fatal_error()
+        case (OP_RIGHT_PAREN)
+          message = "In cell "//trim(to_str(c%id))// ", parentheses not implemented"
+          call fatal_error()
+        case (OP_UNION)
+          message = "In cell "//trim(to_str(c%id))// ", union operator not implemented"
+          call fatal_error()
+        case (OP_DIFFERENCE)
+          message = "In cell "//trim(to_str(c%id))// ", difference operator not implemented"
+          call fatal_error()
+        case default
+          ! simply do all intersections for now
+          !TODO: truly evaluate boolean combinations
+          if (i == 1) then
+            maxQuadVal = expression(i)
+          else
+            if (expression(i) > maxQuadVal) maxQuadVal = expression(i)
+          end if
+      end select
+    end do
+
+    if (abs(maxQuadVal) >= FP_PRECISION) then
+      on_surf = .false.
+    else
+      on_surf = .true.
+    end if
+
+  end function on_cell_surf
+
+
 
 !===============================================================================
 ! FIND_CELL determines what cell a source particle is in within a particular
@@ -424,7 +496,7 @@ contains
     elseif (p % surface < 0  .and. allocated(surf % neighbor_neg)) then
        ! If coming from positive side of surface, search all the neighboring
        ! cells on the negative side
-       
+      
        call find_cell(found, surf % neighbor_neg)
        if (found) return
 
@@ -442,7 +514,7 @@ contains
             &located in any cell and it did not leak."
        call fatal_error()
     end if
-       
+
   end subroutine cross_surface
 
 !===============================================================================
@@ -555,6 +627,7 @@ contains
     integer :: i            ! index for surface in cell
     integer :: index_surf   ! index in surfaces array (with sign)
     real(8) :: x,y,z        ! particle coordinates
+    real(8) :: xyz(3)       ! particle after move
     real(8) :: u,v,w        ! particle directions
     real(8) :: d            ! evaluated distance
     real(8) :: x0,y0,z0     ! coefficients for surface
@@ -604,22 +677,8 @@ contains
           ! the other
 
           index_surf = cl % surfaces(i)
-          if (index_surf == p % surface) then
+          if (abs(index_surf) == abs(p % surface)) then
              on_surface = .true.
-             ! check for tangent by advancing enough to check if we're still in
-             ! the cell.  TINY_BIT wasn't enough to flip the sense in some cases
-             p % coord % xyz = p % coord % xyz + 5*TINY_BIT * p % coord % uvw
-             p % surface = NONE
-             if (.not. cell_contains(cl)) then
-                p % coord % xyz = p % coord % xyz - 5*TINY_BIT * p % coord % uvw
-                p % surface = index_surf
-                dist = 0
-                surface_crossed = -cl%surfaces(i)
-                lattice_crossed = NONE ! we're never tangent to a lattice, right?
-                exit
-             end if
-             p % coord0 % xyz = p % coord0 % xyz - 5*TINY_BIT * p % coord0 % uvw
-             p % surface = index_surf
           else
              on_surface = .false.
           end if
@@ -638,7 +697,16 @@ contains
              else
                 x0 = surf % coeffs(1)
                 d = (x0 - x)/u
-                if (d < ZERO) d = INFINITY
+                if (d < ZERO) then
+                    d = INFINITY
+                else
+                  ! check if we're on a cell-internal portion of the surface
+                  xyz =  coord % xyz + d * coord % uvw
+                  if (.not. on_cell_surf(cl,xyz)) then
+                    d = INFINITY
+                  end if
+                end if
+
              end if
           
           case (SURF_PY)
@@ -647,7 +715,16 @@ contains
              else
                 y0 = surf % coeffs(1)
                 d = (y0 - y)/v
-                if (d < ZERO) d = INFINITY
+                if (d < ZERO) then
+                    d = INFINITY
+                else
+                  ! check if we're on a cell-internal portion of the surface
+                  xyz =  coord % xyz + d * coord % uvw
+                  if (.not. on_cell_surf(cl,xyz)) then
+                    d = INFINITY
+                  end if
+                end if
+
              end if
           
           case (SURF_PZ)
@@ -656,7 +733,16 @@ contains
              else
                 z0 = surf % coeffs(1)
                 d = (z0 - z)/w
-                if (d < ZERO) d = INFINITY
+                if (d < ZERO) then
+                    d = INFINITY
+                else
+                  ! check if we're on a cell-internal portion of the surface
+                  xyz =  coord % xyz + d * coord % uvw
+                  if (.not. on_cell_surf(cl,xyz)) then
+                    d = INFINITY
+                  end if
+                end if
+
              end if
              
           case (SURF_PLANE)
@@ -670,7 +756,16 @@ contains
                 d = INFINITY
              else
                 d = -(A*x + B*y + C*w - D)/tmp
-                if (d < ZERO) d = INFINITY
+                if (d < ZERO) then
+                    d = INFINITY
+                else
+                  ! check if we're on a cell-internal portion of the surface
+                  xyz =  coord % xyz + d * coord % uvw
+                  if (.not. on_cell_surf(cl,xyz)) then
+                    d = INFINITY
+                  end if
+                end if
+
              end if
 
           case (SURF_CYL_X)
@@ -708,7 +803,6 @@ contains
                    ! particle is inside the cylinder, thus one distance must be
                    ! negative and one must be positive. The positive distance
                    ! will be the one with negative sign on sqrt(quad)
-
                    d = (-k + sqrt(quad))/a
 
                 else
@@ -717,7 +811,15 @@ contains
                    ! distance is the one with positive sign on sqrt(quad)
 
                    d = (-k - sqrt(quad))/a
-                   if (d < ZERO) d = INFINITY
+                   if (d < ZERO) then
+                       d = INFINITY
+                   else
+                     ! check if we're on a cell-internal portion of the surface
+                     xyz =  coord % xyz + d * coord % uvw
+                     if (.not. on_cell_surf(cl,xyz)) then
+                       d = INFINITY
+                     end if
+                   end if
 
                 end if
              end if
@@ -766,7 +868,15 @@ contains
                    ! distance is the one with positive sign on sqrt(quad)
 
                    d = (-k - sqrt(quad))/a
-                   if (d < ZERO) d = INFINITY
+                    if (d < ZERO) then
+                        d = INFINITY
+                    else
+                      ! check if we're on a cell-internal portion of the surface
+                      xyz =  coord % xyz + d * coord % uvw
+                      if (.not. on_cell_surf(cl,xyz)) then
+                        d = INFINITY
+                      end if
+                    end if
 
                 end if
              end if
@@ -813,9 +923,21 @@ contains
                    ! particle is outside the cylinder, thus both distances are
                    ! either positive or negative. If positive, the smaller
                    ! distance is the one with positive sign on sqrt(quad)
+                    !write(*,*)"on surface",p % surface,on_surface
 
+                    !write(*,*) "    outside surf ",surf%id
                    d = (-k - sqrt(quad))/a
-                   if (d <= ZERO) d = INFINITY
+                    !write(*,*) "    d: ",d,(d < ZERO)
+                    if (d < ZERO) then
+                        d = INFINITY
+                    else
+                      ! check if we're on a cell-internal portion of the surface
+                      xyz =  coord % xyz + d * coord % uvw
+                       !write(*,*)"on surf?",xyz,on_cell_surf(cl,xyz)
+                      if (.not. on_cell_surf(cl,xyz)) then
+                        d = INFINITY
+                      end if
+                    end if
 
                 end if
              end if
@@ -862,7 +984,15 @@ contains
                 ! one with positive sign on sqrt(quad)
 
                 d = -k - sqrt(quad)
-                if (d < ZERO) d = INFINITY
+                if (d < ZERO) then
+                    d = INFINITY
+                else
+                  ! check if we're on a cell-internal portion of the surface
+                  xyz =  coord % xyz + d * coord % uvw
+                  if (.not. on_cell_surf(cl,xyz)) then
+                    d = INFINITY
+                  end if
+                end if
 
              end if
 
@@ -974,8 +1104,27 @@ contains
     real(8),       intent(in) :: xyz(3) ! coordinates of particle
     integer                   :: s      ! sense of particle
 
+    ! Check which side of surface the point is on
+    if (quad_eval(surf, xyz) > 0) then
+       s = SENSE_POSITIVE
+    else
+       s = SENSE_NEGATIVE
+    end if
+
+  end function sense
+
+
+!===============================================================================
+! QUAD_EVAL calculates the value of F(x,y,z) for each surface
+!===============================================================================
+
+  function quad_eval(surf, xyz) result(func)
+
+    type(Surface), pointer    :: surf   ! surface
+    real(8),       intent(in) :: xyz(3) ! coordinates of particle
+    real(8)                   :: func   ! surface function evaluated at point
+
     real(8) :: x,y,z    ! coordinates of particle
-    real(8) :: func     ! surface function evaluated at point
     real(8) :: A        ! coefficient on x**2 term in GQ
     real(8) :: B        ! coefficient on y**2 term in GQ
     real(8) :: C        ! coefficient on z**2 term in GQ
@@ -1053,11 +1202,12 @@ contains
        z0 = surf % coeffs(2)
        y1 = surf % coeffs(3)
        z1 = surf % coeffs(4)
-       if (y >= y0 .and. y < y1 .and. z >= z0 .and. z < z1) then
-          s = SENSE_NEGATIVE
-       else
-          s = SENSE_POSITIVE
-       end if
+      
+       func = y0 - y
+       if ((y - y1) > func) func = y - y1
+       if ((z0 - z) > func) func = z0 - z
+       if ((z - z1) > func) func = z - z1
+
        return
 
     case (SURF_BOX_Y)
@@ -1065,11 +1215,12 @@ contains
        z0 = surf % coeffs(2)
        x1 = surf % coeffs(3)
        z1 = surf % coeffs(4)
-       if (x >= x0 .and. x < x1 .and. z >= z0 .and. z < z1) then
-          s = SENSE_NEGATIVE
-       else
-          s = SENSE_POSITIVE
-       end if
+
+       func = x0 - x
+       if ((x - x1) > func) func = x - x1
+       if ((z0 - z) > func) func = z0 - z
+       if ((z - z1) > func) func = z - z1
+
        return
 
     case (SURF_BOX_Z)
@@ -1077,11 +1228,12 @@ contains
        y0 = surf % coeffs(2)
        x1 = surf % coeffs(3)
        y1 = surf % coeffs(4)
-       if (x >= x0 .and. x < x1 .and. y >= y0 .and. y < y1) then
-          s = SENSE_NEGATIVE
-       else
-          s = SENSE_POSITIVE
-       end if
+
+       func = y0 - y
+       if ((y - y1) > func) func = y - y1
+       if ((x0 - x) > func) func = x0 - x
+       if ((x - x1) > func) func = x - x1
+
        return
 
     case (SURF_BOX)
@@ -1091,12 +1243,14 @@ contains
        x1 = surf % coeffs(4)
        y1 = surf % coeffs(5)
        z1 = surf % coeffs(6)
-       if (x >= x0 .and. x < x1 .and. y >= y0 .and. y < y1 .and. & 
-            z >= z0 .and. z < z1) then
-          s = SENSE_NEGATIVE
-       else
-          s = SENSE_POSITIVE
-       end if
+
+       func = y0 - y
+       if ((y - y1) > func) func = y - y1
+       if ((x0 - x) > func) func = x0 - x
+       if ((x - x1) > func) func = x - x1
+       if ((z0 - z) > func) func = z0 - z
+       if ((z - z1) > func) func = z - z1
+
        return
 
     case (SURF_GQ)
@@ -1115,14 +1269,7 @@ contains
 
     end select
 
-    ! Check which side of surface the point is on
-    if (func > 0) then
-       s = SENSE_POSITIVE
-    else
-       s = SENSE_NEGATIVE
-    end if
-
-  end function sense
+  end function quad_eval
 
 !===============================================================================
 ! NEIGHBOR_LISTS builds a list of neighboring cells to each surface to speed up
