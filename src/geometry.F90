@@ -82,6 +82,46 @@ contains
 
 
 !===============================================================================
+! BOOLEAN_IMPLICIT_EVAL resolves the boolean algebra for combined implicit
+! volumes defined as F(x,y,z) < 0.  For intersections of volumes you take the
+! max of each F(x,y,z), and for unions you take the min.  For differences, it's
+! max[F_1(x,y,z), -F_2(x,y,z)], etc
+!===============================================================================
+  function boolean_implicit_eval(c, expression) result(val)
+
+    type(Cell), intent(in),       pointer :: c
+    real(8),    intent(in),dimension(:)   :: expression
+    real(8)                               :: val
+
+    integer :: i
+
+    do i = 1,c%n_surfaces
+
+      select case (c%surfaces(i))
+        case (OP_LEFT_PAREN)
+          write(*,*)"("
+        case (OP_RIGHT_PAREN)
+          write(*,*)")"
+        case (OP_UNION)
+          write(*,*)":"
+        case (OP_DIFFERENCE)
+          write(*,*)"#"
+        case default
+          write(*,*)expression(i)
+      end select
+
+    end do
+
+    write(*,*)""
+
+    val = 0.0_8
+
+  end function boolean_implicit_eval
+
+
+
+
+!===============================================================================
 ! ON_CELL_SURF checks if the coordinates of a particle are in fact on the
 ! outer surface of the specified cell.  For intersections you take the max of
 ! each F(x,y,z), and for unions you take the min.  For difference, it's
@@ -93,7 +133,7 @@ contains
     real(8),intent(in)        :: xyz(3)  ! coordinates of particle
     logical                   :: on_surf
 
-    real(8), allocatable :: expression(:) ! copy of surfaces list
+    real(8), allocatable :: expression(:)
     integer :: n_surf          ! number of surfaces in cell
     integer :: i               ! index of surfaces in cell
     integer :: current_surface ! current surface of particle (with sign)
@@ -107,17 +147,20 @@ contains
       return
     end if
 
-    ! Make copy of surface list and save evaluations
+    ! Evaluate each F(x,y,z) and save to expression list
     n_surf = size(c % surfaces)
     allocate(expression(n_surf))
     do i = 1, n_surf
        ! Don't change logical operator
-       if (expression(i) >= OP_DIFFERENCE) then
-          cycle
-       end if
+       if (c % surfaces(i) >= OP_DIFFERENCE) cycle
        surf => surfaces(abs(c%surfaces(i)))
        expression(i) = -1.0_8*dble(sign(1,c%surfaces(i)))*quad_eval(surf, xyz)
     end do
+
+    maxQuadVal = boolean_implicit_eval(c,expression)
+    write(*,*)maxQuadVal
+    message = "intentional break"
+    call fatal_error()
 
     ! Evaluate boolean implicit function
     do i = 1, n_surf
@@ -506,6 +549,8 @@ contains
     ! COULDN'T FIND PARTICLE IN NEIGHBORING CELLS, SEARCH ALL CELLS
 
     call find_cell(found)
+
+    write(*,*)found
 
     ! Couldn't find next cell anywhere!
     if ((.not. found) .and. (.not. plotting)) then
@@ -1300,6 +1345,7 @@ contains
 
        ! loop over each surface specification
        do j = 1, c % n_surfaces
+          if (c % surfaces(j) >= OP_DIFFERENCE) cycle
           i_surface = c % surfaces(j)
           positive = (i_surface > 0)
           i_surface = abs(i_surface)
@@ -1331,6 +1377,7 @@ contains
 
        ! loop over each surface specification
        do j = 1, c % n_surfaces
+          if (c % surfaces(j) >= OP_DIFFERENCE) cycle
           i_surface = c % surfaces(j)
           positive = (i_surface > 0)
           i_surface = abs(i_surface)

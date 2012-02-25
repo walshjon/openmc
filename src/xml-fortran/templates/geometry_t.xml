@@ -10,7 +10,7 @@
     <component name="universe" type="integer" default="0" />
     <component name="material" type="integer" default="0" />
     <component name="fill" type="integer" default="0" />
-    <component name="surfaces" type="integer-array" />
+    <component name="surfaces" type="surface-array" />
   </typedef>
 
   <typedef name="surface_xml">

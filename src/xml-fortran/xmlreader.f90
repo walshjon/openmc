@@ -60,7 +60,7 @@ program xmlreader
    character(len=50), dimension(:,:), pointer :: new_types
    
    ! TODO: arrays of integers etc, in addition to integer-arrays - see: word
-   integer, parameter                     :: notypes_predefined = 27
+   integer, parameter                     :: notypes_predefined = 28
    character(len=50), dimension(1:4,1:notypes_predefined) :: predefined_types
    integer                                :: notypes = notypes_predefined
    data ((predefined_types(i,j) , i=1,4), j=1,notypes_predefined ) / &
@@ -71,6 +71,7 @@ program xmlreader
 'integer'       ,'   integer'                        , 'read_xml_integer',       'write_to_xml_integer', &
 'integer-1dim'  ,'   integer, dimension(:), pointer' , 'read_xml_integer_1dim',  'write_to_xml_integer_1dim',  &
 'integer-array' ,'   integer, dimension(:), pointer' , 'read_xml_integer_array', 'write_to_xml_integer_array', &
+'surface-array' ,'   integer, dimension(:), pointer' , 'read_xml_surface_array', 'write_to_xml_integer_array', &
 'integer-shape' ,'   integer, dimension(SHAPE)'      , 'read_xml_integer_array', 'write_to_xml_integer_array', &
 'real'          ,'   real'                           , 'read_xml_real'   ,       'write_to_xml_real'   , &
 'real-1dim'     ,'   real, dimension(:), pointer'    , 'read_xml_real_1dim',     'write_to_xml_real_1dim', &

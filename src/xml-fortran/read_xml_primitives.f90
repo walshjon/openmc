@@ -204,6 +204,33 @@ subroutine read_xml_integer_array( info, tag, endtag, attribs, noattribs, data, 
 
 end subroutine read_xml_integer_array
 
+
+! read_xml_surface_array --
+!    CUSTOM FOR OPENMC
+!    Routine to read a one-dimensional integer array from the parsed
+!    data, extracting openMC parenthases, union, and difference operators
+!
+! Arguments:
+!    info        XML parser structure
+!    tag         The tag in question (error message only)
+!    endtag      End tag found? (Dummy argument, actually)
+!    attribs     Array of attributes and their values
+!    noattribs   Number of attributes found
+!    data        Array of strings, representing the data
+!    nodata      Number of data strings
+!    var         Variable to be filled
+!    has_var     Has the variable been set?
+!
+subroutine read_xml_surface_array( info, tag, endtag, attribs, noattribs, data, &
+                                   nodata, var, has_var )
+   integer, dimension(:), pointer                :: var
+
+   include 'read_xml_surface_array.inc'
+
+end subroutine read_xml_surface_array
+
+
+
 ! read_xml_line_array --
 !    Routine to read an array of lines of text from the parsed data
 !
