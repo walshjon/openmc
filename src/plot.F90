@@ -10,6 +10,7 @@ module plot
   use global
   use particle_header, only: LocalCoord, deallocate_coord
   use source,          only: initialize_particle
+  use string,          only: to_str
 
   implicit none
 
@@ -23,9 +24,12 @@ contains
 
     !TODO: deal with cell universes
 
+    write(*,*)"Sweeping x"
     call find_cell_pointclouds(0)
-    call find_cell_pointclouds(1)
-    call find_cell_pointclouds(2)
+    write(*,*)"Sweeping y"
+    !call find_cell_pointclouds(1)
+    write(*,*)"Sweeping z"
+    !call find_cell_pointclouds(2)
 
     call dump_point_cloud()
     !call dump_cell_quadrics()
@@ -105,7 +109,7 @@ contains
       ! loop over horizontal rays
       do while(xyz(innerI) >= last_inner_coord)
 
-         write(*,*)"starting ray at ",xyz
+         !write(*,*)"starting ray at ",xyz
 
          ! initialize the particle and set starting coordinate and direction
          call initialize_particle()
@@ -146,45 +150,32 @@ contains
             p % coord0 % cell = NONE
             p % surface = -enter_surface
             call cross_surface(NONE)
-
+            last_cell = p % coord0 % cell
          end if
 
          ! =======================================================================
          ! MOVE PARTICLE ACROSS HORIZONTAL TRACK
 
          do while (p % alive)
-            write(*,*)"at:",p % coord0 % xyz
-            write(*,*)"in:",p % coord % cell
+
+            !write(*,*)"at0: ",p%coord0%xyz
+            !write(*,*)"at: ",p%coord%xyz
 
             if (p % coord % cell == 0) then
-              message = "Voids inside the plotting area, or bad boundary conditions."
+              message = "Plotting error. Are there voids inside the plotting " // &
+                        "area, or bad boundary conditions?  Particle at: "     // &
+                        "(" // trim(to_str(p % coord % xyz(1))) // &
+                        "," // trim(to_str(p % coord % xyz(2))) // &
+                        "," // trim(to_str(p % coord % xyz(3))) // ")"
               call fatal_error()
-
-              !call track_through_void(distance, enter_surface, p % coord % xyz)
-
-              ! No cell was found on this horizontal ray
-              !if (distance == INFINITY) then
-              !   exit
-              !end if
-
-              ! Write coordinate where next cell begins
-              !write(*,*)"moving: ",p % coord % xyz, distance
-              !p % coord0 % xyz = p % coord % xyz + distance * p % coord % uvw
-              !write(*,*)"   about to add ",p % coord0 % xyz
-              !c => cells(p % coord0 % cell)
-              !call add_pointcloud_point(c)
-
-              ! Process surface crossing for next cell
-              !p % coord0 % cell = NONE
-              !p % surface = -enter_surface
-              !call cross_surface(NONE)
-              !write(*,*)"here"
-              !cycle
-
             else
 
               c => cells(p % coord % cell)
               call add_pointcloud_point(c)
+              if (last_cell > 0) then
+                c => cells(last_cell)
+                call add_pointcloud_point(c)
+              end if
 
               ! save particle's current cell
               last_cell = p % coord % cell
@@ -198,21 +189,17 @@ contains
                coord => coord % next
             end do
 
-            ! If next boundary crossing is out of range of the plot, only include
-            ! the visible portion and move to next horizontal ray
+            ! If next boundary crossing is out of range of the plot,
+            ! move to next horizontal ray
             if (p % coord0 % xyz(trackI) >= last_track_coord) then
-              p % alive = .false.
-              p % coord0 % xyz(trackI) = last_track_coord
-
-              !c => cells(last_cell)
-              !call add_pointcloud_point(c)
-
               exit
-
             end if
 
             c => cells(p % coord % cell)
             call add_pointcloud_point(c)
+            c => cells(last_cell)
+            call add_pointcloud_point(c)
+
 
             p % coord % cell = 0
             if (lattice_crossed /= NONE) then
@@ -221,12 +208,9 @@ contains
             else
                p % surface = surface_crossed
                call cross_surface(last_cell)
-                write(*,*)"SURFACE",surface_crossed
+
                if (surfaces(abs(surface_crossed)) % bc /= BC_TRANSMIT) then
                   exit
-                  !c => cells(last_cell)
-                  !call add_pointcloud_point(c)
-
                end if
             end if
 
@@ -278,8 +262,8 @@ contains
     type(Cell),       pointer :: c    => null()
     type(Universe),   pointer :: univ => null()
 
-    write(*,*)"searching from void p:",xyz
-    write(*,*)"along ",p % coord0 % uvw
+    !write(*,*)"searching from void p:",xyz
+    !write(*,*)"along ",p % coord0 % uvw
 
     ! Clear any coordinates beyond first level
     call deallocate_coord(p % coord0 % next)
@@ -299,16 +283,16 @@ contains
           c => cells(p % coord0 % cell)
           p % coord0 % xyz = p % coord0 % xyz + d * p % coord0 % uvw
 
-          if (.not. on_cell_surf(c,p % coord0 % xyz)) cycle
+          if (.not. on_cell_surf(c)) cycle
 
-          last_cell = p % coord0 % cell
           ! Set new distance and retain pointer to this cell
           distance = d
+          last_cell = p % coord0 % cell
           enter_surface = surface_crossed
        end if
     end do
 
-    write(*,*)"found dist",distance
+    !write(*,*)"found dist",distance
 
     p % coord0 % cell = last_cell
     p % coord0 % xyz = xyz
@@ -325,18 +309,18 @@ contains
 
     type(Cell),       pointer :: c
 
+    if (c%n_points >= MAX_POINTCLOUD_POINTS ) return
+
     call dict_add_key(plot_cells_dict,c%id,c%id)
+
     if (.not. allocated(c%pointcloud)) then
-      allocate(c%pointcloud(100000))
+      allocate(c%pointcloud(MAX_POINTCLOUD_POINTS))
     end if
+
+    !write(*,*)"adding to cell: ",c%id
+    !write(*,*)"p: ",p%coord%xyz
+
     c%n_points = c%n_points + 1
-
-    if (c%n_points > 100000 ) return
-
-    write(*,*)c%id
-    write(*,*)"adding ",c%n_points,p%coord0%xyz
-    write(*,*)""
-
     c%pointcloud(c%n_points)%xyz = p%coord0%xyz
 
     call update_cell_limits(c)

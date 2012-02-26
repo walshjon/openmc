@@ -15,7 +15,124 @@ module geometry
 contains
 
 !===============================================================================
-! CELL_CONTAINS determines whether a given point is inside a cell
+! BOOLEAN_IMPLICIT_EVAL resolves the boolean algebra for combined implicit
+! volumes defined as F(x,y,z) < 0.  For intersections you take the max, for
+! unions the min, and for differences you do MAX[F_1(x,y,z),-F_2(x,y,z)]
+!
+!   expression should be an array matching the size of c%surfaces, where the
+!   value in each position corresponds to the evaluation of F(x,y,z) for the
+!   surface specified at that position, values at logical operator positions
+!   won't be read
+!===============================================================================
+  recursive function boolean_implicit_eval(c, expression, startS, endS) result(val)
+
+    type(Cell), intent(in), pointer       :: c
+    real(8),    intent(in), dimension(:)  :: expression
+    integer,    optional                  :: startS ! start of subgroup of expression
+    integer,    optional                  :: endS   ! end of subgroup of expression
+    real(8)                               :: val
+
+    integer :: i                  ! surface index
+    integer :: start,end_         ! start and end indeces of expression to process
+    integer :: num_rparen         ! number of right parenthases expected when in group
+    real(8) :: F_val              ! evalutation of an F(x,y,z) block
+    logical :: union, difference  ! whether or not the next F_val should be union/difference
+    integer :: start_group        ! index of start of an F(x,y,z) block (left paren)
+    logical :: no_val             ! flag for first time val is checked
+
+    if (.not. present(startS)) then
+      start = 1
+      end_ = c%n_surfaces
+    else
+      start = startS
+      end_ = endS
+    end if
+
+    num_rparen = 0
+    union = .false.
+    difference = .false.
+    no_val = .true.
+
+    do i = start,end_
+      select case (c%surfaces(i))
+
+        case (OP_RIGHT_PAREN)
+
+          num_rparen = num_rparen - 1
+
+          if (num_rparen > 0) then
+            cycle
+          else if (num_rparen < 0) then
+            message = "Right paren without left paren in cell " // trim(to_str(c%id))
+            call fatal_error()
+          end if
+
+          ! recursively get the evaluation for this block inside the parenthases
+          F_val = boolean_implicit_eval(c,expression,start_group,i-1)
+
+          ! proceed to do max or min depending on union/difference
+
+        case (OP_LEFT_PAREN)
+          ! @ lparen, scan until corresponding rparen and ignore everything else
+
+          num_rparen = num_rparen + 1
+
+          if (num_rparen == 1) then
+            start_group = i+1
+          end if
+
+          cycle
+
+        case (OP_UNION)
+          if (num_rparen > 0) cycle
+
+          union = .true.
+
+          cycle
+
+        case (OP_DIFFERENCE)
+          if (num_rparen > 0) cycle
+
+          difference = .true.
+
+          cycle
+
+        case default
+          if (num_rparen > 0) cycle
+
+          F_val = expression(i)
+
+          ! proceed to do max or min depending on union/difference
+
+      end select
+
+      if (num_rparen > 0) then
+        message = "Left paren without right paren in cell " // trim(to_str(c%id))
+        call fatal_error()
+      end if
+
+      if (no_val) then
+        val = F_val
+        no_val = .false.
+      else
+        if (union) then
+          if (F_val < val)  val = F_val
+          union = .false.
+        else if (difference) then
+          if (-F_val > val) val = -F_val
+          difference = .false.
+        else ! intersection
+          if (F_val > val)  val = F_val
+        end if
+      end if
+
+    end do ! end loop over all surfaces/expression vals in this group
+
+  end function boolean_implicit_eval
+
+!===============================================================================
+! CELL_CONTAINS determines whether a given point is inside a cell or on the
+! surface (regardless of direction of travel).
 !===============================================================================
 
   function cell_contains(c) result(in_cell)
@@ -23,56 +140,36 @@ contains
     type(Cell),     pointer :: c
     logical                 :: in_cell
 
-    integer, allocatable :: expression(:) ! copy of surfaces list
-    real(8) :: val             ! evaluation of F(x,y,z)
+    real(8), allocatable :: expression(:)
+    real(8) :: cell_eval       ! evaluation of F(x,y,z)
     integer :: n_surf          ! number of surfaces in cell
     integer :: i               ! index of surfaces in cell
-    integer :: surf_num        ! index in surfaces array (with sign)
     integer :: current_surface ! current surface of particle (with sign)
     type(Surface), pointer  :: surf => null()
 
     current_surface = p % surface
 
+    ! Evaluate each F(x,y,z) and save to expression list
     n_surf = size(c % surfaces)
     allocate(expression(n_surf))
-    expression = c % surfaces
     do i = 1, n_surf
 
-       ! Don't change logical operator
-       if (expression(i) >= OP_DIFFERENCE) then
-          cycle
+       ! logical operators won't be used, set them to positive (outside)
+       if (c % surfaces(i) >= OP_DIFFERENCE) then
+        expression(i) = 1.0_8
+        cycle
        end if
 
-       ! Lookup surface
-       surf_num = expression(i)
-       surf => surfaces(abs(surf_num))
-
-       ! Check if the particle is currently on the specified surface
-       if (surf_num == current_surface) then
-          ! particle is on specified surface heading into cell
-          expression(i) = 1
-          cycle
-       elseif (surf_num == -current_surface) then
-          ! particle is on specified surface, but heading other direction
-          expression(i) = 0
-          cycle
-       end if
-
-       ! Compare sense of point to specified sense
-       val = -1.0_8*dble(sign(1,expression(i)))*quad_eval(surf,p % coord % xyz)
-       if (val <= 0.0_8) then
-          expression(i) = 1
-       else
-          expression(i) = 0
-       end if
+       surf => surfaces(abs(c%surfaces(i)))
+       expression(i) = -1.0_8*dble(sign(1,c%surfaces(i)))*quad_eval(surf, p % coord % xyz)
     end do
 
-    ! TODO: Need to replace this with a 'lgeval' like subroutine that can
-    ! actually test expressions with unions and parentheses
-    if (all(expression == 1)) then
-       in_cell = .true.
+    cell_eval = boolean_implicit_eval(c,expression)
+
+    if (cell_eval <= FP_PRECISION ) then
+      in_cell = .true.
     else
-       in_cell = .false.
+      in_cell = .false.
     end if
 
     ! Free up memory from expression
@@ -82,117 +179,50 @@ contains
 
 
 !===============================================================================
-! BOOLEAN_IMPLICIT_EVAL resolves the boolean algebra for combined implicit
-! volumes defined as F(x,y,z) < 0.  For intersections of volumes you take the
-! max of each F(x,y,z), and for unions you take the min.  For differences, it's
-! max[F_1(x,y,z), -F_2(x,y,z)], etc
-!===============================================================================
-  function boolean_implicit_eval(c, expression) result(val)
-
-    type(Cell), intent(in),       pointer :: c
-    real(8),    intent(in),dimension(:)   :: expression
-    real(8)                               :: val
-
-    integer :: i
-
-    do i = 1,c%n_surfaces
-
-      select case (c%surfaces(i))
-        case (OP_LEFT_PAREN)
-          write(*,*)"("
-        case (OP_RIGHT_PAREN)
-          write(*,*)")"
-        case (OP_UNION)
-          write(*,*)":"
-        case (OP_DIFFERENCE)
-          write(*,*)"#"
-        case default
-          write(*,*)expression(i)
-      end select
-
-    end do
-
-    write(*,*)""
-
-    val = 0.0_8
-
-  end function boolean_implicit_eval
-
-
-
-
-!===============================================================================
 ! ON_CELL_SURF checks if the coordinates of a particle are in fact on the
-! outer surface of the specified cell.  For intersections you take the max of
-! each F(x,y,z), and for unions you take the min.  For difference, it's
-! max[F_1(x,y,z), -F_2(x,y,z)]
+! outer surface of the specified cell.
 !===============================================================================
-  function on_cell_surf(c,xyz) result(on_surf)
+  function on_cell_surf(c) result(on_surf)
 
     type(Cell),       pointer :: c
-    real(8),intent(in)        :: xyz(3)  ! coordinates of particle
     logical                   :: on_surf
 
     real(8), allocatable :: expression(:)
     integer :: n_surf          ! number of surfaces in cell
     integer :: i               ! index of surfaces in cell
-    integer :: current_surface ! current surface of particle (with sign)
-    real(8) :: maxQuadVal      ! maximum quad_eval of each 
+    real(8) :: cell_eval       ! evaluation of combined F(x,y,z)
     type(Surface), pointer  :: surf => null()
 
-    ! We'll assume that if the particles surface was set, it really is true
-    current_surface = p % surface
-    if (current_surface /= NONE) then
-      on_surf = .true.
-      return
-    end if
+    ! We'll assume that if the particle's surface was set, it really is true
+    !if (p % surface /= NONE) then
+    !  on_surf = .true.
+    !  return
+    !end if
 
     ! Evaluate each F(x,y,z) and save to expression list
     n_surf = size(c % surfaces)
     allocate(expression(n_surf))
     do i = 1, n_surf
-       ! Don't change logical operator
-       if (c % surfaces(i) >= OP_DIFFERENCE) cycle
+
+       ! logical operators won't be used, but just in case set them to positive
+       if (c % surfaces(i) >= OP_DIFFERENCE) then
+        expression(i) = 1.0_8
+        cycle
+       end if
+
        surf => surfaces(abs(c%surfaces(i)))
-       expression(i) = -1.0_8*dble(sign(1,c%surfaces(i)))*quad_eval(surf, xyz)
+       expression(i) = -1.0_8*dble(sign(1,c%surfaces(i)))*quad_eval(surf, p % coord % xyz)
     end do
 
-    maxQuadVal = boolean_implicit_eval(c,expression)
-    write(*,*)maxQuadVal
-    message = "intentional break"
-    call fatal_error()
+    cell_eval = boolean_implicit_eval(c,expression)
 
-    ! Evaluate boolean implicit function
-    do i = 1, n_surf
-      select case (c%surfaces(i))
-        case (OP_LEFT_PAREN)
-          message = "In cell "//trim(to_str(c%id))// ", parentheses not implemented"
-          call fatal_error()
-        case (OP_RIGHT_PAREN)
-          message = "In cell "//trim(to_str(c%id))// ", parentheses not implemented"
-          call fatal_error()
-        case (OP_UNION)
-          message = "In cell "//trim(to_str(c%id))// ", union operator not implemented"
-          call fatal_error()
-        case (OP_DIFFERENCE)
-          message = "In cell "//trim(to_str(c%id))// ", difference operator not implemented"
-          call fatal_error()
-        case default
-          ! simply do all intersections for now
-          !TODO: truly evaluate boolean combinations
-          if (i == 1) then
-            maxQuadVal = expression(i)
-          else
-            if (expression(i) > maxQuadVal) maxQuadVal = expression(i)
-          end if
-      end select
-    end do
-
-    if (abs(maxQuadVal) >= FP_PRECISION) then
+    if (abs(cell_eval) >= FP_PRECISION) then
       on_surf = .false.
     else
       on_surf = .true.
     end if
+
+    deallocate(expression)
 
   end function on_cell_surf
 
@@ -210,6 +240,7 @@ contains
     integer, optional        :: search_cells(:)
 
     integer :: i                    ! index over cells
+    integer :: tmpu
     integer :: x                    ! x-index for lattice
     integer :: y                    ! y-index for lattice
     integer :: n                    ! number of cells to search
@@ -322,7 +353,7 @@ contains
                 p % coord % lattice_y = y
                 p % coord % universe  = lat % element(x,y)
              end if
-
+ tmpu = p % coord % universe
              call find_cell(found)
              if (.not. found) exit
           end if
@@ -550,8 +581,6 @@ contains
 
     call find_cell(found)
 
-    write(*,*)found
-
     ! Couldn't find next cell anywhere!
     if ((.not. found) .and. (.not. plotting)) then
        message = "After particle " // trim(to_str(p % id)) // " crossed surface " &
@@ -672,9 +701,9 @@ contains
     integer :: i            ! index for surface in cell
     integer :: index_surf   ! index in surfaces array (with sign)
     real(8) :: x,y,z        ! particle coordinates
-    real(8) :: xyz(3)       ! particle after move
     real(8) :: u,v,w        ! particle directions
     real(8) :: d            ! evaluated distance
+    real(8) :: tmpd         ! tmp evaluated 
     real(8) :: x0,y0,z0     ! coefficients for surface
     real(8) :: r            ! radius for quadratic surfaces
     real(8) :: tmp          ! dot product of surface normal with direction
@@ -711,6 +740,8 @@ contains
 
        SURFACE_LOOP: do i = 1, cl % n_surfaces
 
+
+
           ! copy local coordinates of particle
           x = coord % xyz(1)
           y = coord % xyz(2)
@@ -746,10 +777,12 @@ contains
                     d = INFINITY
                 else
                   ! check if we're on a cell-internal portion of the surface
-                  xyz =  coord % xyz + d * coord % uvw
-                  if (.not. on_cell_surf(cl,xyz)) then
+                  tmpd = d
+                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                  if (.not. on_cell_surf(cl)) then
                     d = INFINITY
                   end if
+                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
                 end if
 
              end if
@@ -764,10 +797,12 @@ contains
                     d = INFINITY
                 else
                   ! check if we're on a cell-internal portion of the surface
-                  xyz =  coord % xyz + d * coord % uvw
-                  if (.not. on_cell_surf(cl,xyz)) then
+                  tmpd = d
+                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                  if (.not. on_cell_surf(cl)) then
                     d = INFINITY
                   end if
+                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
                 end if
 
              end if
@@ -782,10 +817,12 @@ contains
                     d = INFINITY
                 else
                   ! check if we're on a cell-internal portion of the surface
-                  xyz =  coord % xyz + d * coord % uvw
-                  if (.not. on_cell_surf(cl,xyz)) then
+                  tmpd = d
+                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                  if (.not. on_cell_surf(cl)) then
                     d = INFINITY
                   end if
+                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
                 end if
 
              end if
@@ -805,10 +842,12 @@ contains
                     d = INFINITY
                 else
                   ! check if we're on a cell-internal portion of the surface
-                  xyz =  coord % xyz + d * coord % uvw
-                  if (.not. on_cell_surf(cl,xyz)) then
+                  tmpd = d
+                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                  if (.not. on_cell_surf(cl)) then
                     d = INFINITY
                   end if
+                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
                 end if
 
              end if
@@ -860,10 +899,12 @@ contains
                        d = INFINITY
                    else
                      ! check if we're on a cell-internal portion of the surface
-                     xyz =  coord % xyz + d * coord % uvw
-                     if (.not. on_cell_surf(cl,xyz)) then
+                     tmpd = d
+                     coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                     if (.not. on_cell_surf(cl)) then
                        d = INFINITY
                      end if
+                     coord % xyz  =  coord % xyz - tmpd * coord % uvw
                    end if
 
                 end if
@@ -917,10 +958,12 @@ contains
                         d = INFINITY
                     else
                       ! check if we're on a cell-internal portion of the surface
-                      xyz =  coord % xyz + d * coord % uvw
-                      if (.not. on_cell_surf(cl,xyz)) then
+                      tmpd = d
+                      coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                      if (.not. on_cell_surf(cl)) then
                         d = INFINITY
                       end if
+                      coord % xyz  =  coord % xyz - tmpd * coord % uvw
                     end if
 
                 end if
@@ -968,20 +1011,18 @@ contains
                    ! particle is outside the cylinder, thus both distances are
                    ! either positive or negative. If positive, the smaller
                    ! distance is the one with positive sign on sqrt(quad)
-                    !write(*,*)"on surface",p % surface,on_surface
 
-                    !write(*,*) "    outside surf ",surf%id
                    d = (-k - sqrt(quad))/a
-                    !write(*,*) "    d: ",d,(d < ZERO)
                     if (d < ZERO) then
                         d = INFINITY
                     else
                       ! check if we're on a cell-internal portion of the surface
-                      xyz =  coord % xyz + d * coord % uvw
-                       !write(*,*)"on surf?",xyz,on_cell_surf(cl,xyz)
-                      if (.not. on_cell_surf(cl,xyz)) then
+                      tmpd = d
+                      coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                      if (.not. on_cell_surf(cl)) then
                         d = INFINITY
                       end if
+                      coord % xyz  =  coord % xyz - tmpd * coord % uvw
                     end if
 
                 end if
@@ -992,7 +1033,7 @@ contains
              y0 = surf % coeffs(2)
              z0 = surf % coeffs(3)
              r = surf % coeffs(4)
-
+             
              x = x - x0
              y = y - y0
              z = z - z0
@@ -1033,16 +1074,22 @@ contains
                     d = INFINITY
                 else
                   ! check if we're on a cell-internal portion of the surface
-                  xyz =  coord % xyz + d * coord % uvw
-                  if (.not. on_cell_surf(cl,xyz)) then
+                  tmpd = d
+                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
+                  if (.not. on_cell_surf(cl)) then
                     d = INFINITY
                   end if
+                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
                 end if
 
              end if
 
           case (SURF_GQ)
              message = "Surface distance not yet implement for general quadratic."
+             call fatal_error()
+
+          case default
+             message = "Surface distance not yet implement for type " // trim(to_str(surf % type))
              call fatal_error()
 
           end select

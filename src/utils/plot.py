@@ -73,7 +73,6 @@ class Plot(object):
             pointPolyData.GetPointData().SetScalars(cellData)
             pointPolyData.GetPointData().AddArray(cellData2)
             pointPolyData.SetVerts(ptVerts)
-            #pointPolyData.GetPointData().SetScalars(scalars)
             
             if onlyPlotPoints:
         

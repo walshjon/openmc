@@ -67,31 +67,8 @@
                     j = j + 1
                 end if
             end do
-            !bufferd(start:) = data(idx)
-            !start           = start + len(data(idx)) + 1
          endif
       enddo
-
-
-write(*,*)bufferd
-!j = 0
-!do i=1,len(bufferd)
-!    j = j + 1
-!    write(*,*)bufferd(i:i)
-!    if (bufferd(i:i) == '(') then
-!        write(*,*)huge(0)
-!    else
-!        bufferR(j:j) = bufferd(i:i)
-!    end if
-!end do
-!write(*,*)bufferR
-
-!do i=1,nodata*(len(data(1))+1)
-!    do j=1,size(bufferd(i:))
-!        write(*,*)bufferd(i,j)
-!    end do
-!end do
-
       call read_from_buffer( bufferd, var, ierr )
       if ( bufferd .ne. ' ' ) then
          has_var = .true.

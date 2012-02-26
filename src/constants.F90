@@ -319,4 +319,7 @@ module constants
   integer, parameter :: UNIT_TALLY   = 12 ! unit # for writing tally file
   integer, parameter :: UNIT_PLOT    = 13 ! unit # for writing plot file
 
+  ! Plotting constants
+  integer, parameter :: MAX_POINTCLOUD_POINTS = 200000 ! max # of points per cell
+
 end module constants
