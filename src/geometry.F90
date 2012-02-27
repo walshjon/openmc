@@ -263,8 +263,6 @@ contains
        n = univ % n_cells
     end if
 
-
-    !write(*,*)p % coord % xyz
     do i = 1, n
        ! select cells based on whether we are searching a universe or a provided
        ! list of cells (this would be for lists of neighbor cells)
@@ -741,8 +739,6 @@ contains
 
        SURFACE_LOOP: do i = 1, cl % n_surfaces
 
-
-
           ! copy local coordinates of particle
           x = coord % xyz(1)
           y = coord % xyz(2)
@@ -774,17 +770,7 @@ contains
              else
                 x0 = surf % coeffs(1)
                 d = (x0 - x)/u
-                if (d < ZERO) then
-                    d = INFINITY
-                else
-                  ! check if we're on a cell-internal portion of the surface
-                  tmpd = d
-                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                  if (.not. on_cell_surf(cl)) then
-                    d = INFINITY
-                  end if
-                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                end if
+                if (d < ZERO) d = INFINITY
 
              end if
           
@@ -794,17 +780,7 @@ contains
              else
                 y0 = surf % coeffs(1)
                 d = (y0 - y)/v
-                if (d < ZERO) then
-                    d = INFINITY
-                else
-                  ! check if we're on a cell-internal portion of the surface
-                  tmpd = d
-                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                  if (.not. on_cell_surf(cl)) then
-                    d = INFINITY
-                  end if
-                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                end if
+                if (d < ZERO) d = INFINITY
 
              end if
           
@@ -814,17 +790,7 @@ contains
              else
                 z0 = surf % coeffs(1)
                 d = (z0 - z)/w
-                if (d < ZERO) then
-                    d = INFINITY
-                else
-                  ! check if we're on a cell-internal portion of the surface
-                  tmpd = d
-                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                  if (.not. on_cell_surf(cl)) then
-                    d = INFINITY
-                  end if
-                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                end if
+                if (d < ZERO) d = INFINITY
 
              end if
              
@@ -839,17 +805,7 @@ contains
                 d = INFINITY
              else
                 d = -(A*x + B*y + C*w - D)/tmp
-                if (d < ZERO) then
-                    d = INFINITY
-                else
-                  ! check if we're on a cell-internal portion of the surface
-                  tmpd = d
-                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                  if (.not. on_cell_surf(cl)) then
-                    d = INFINITY
-                  end if
-                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                end if
+                if (d < ZERO) d = INFINITY
 
              end if
 
@@ -896,17 +852,7 @@ contains
                    ! distance is the one with positive sign on sqrt(quad)
 
                    d = (-k - sqrt(quad))/a
-                   if (d < ZERO) then
-                       d = INFINITY
-                   else
-                     ! check if we're on a cell-internal portion of the surface
-                     tmpd = d
-                     coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                     if (.not. on_cell_surf(cl)) then
-                       d = INFINITY
-                     end if
-                     coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                   end if
+                   if (d < ZERO) d = INFINITY
 
                 end if
              end if
@@ -955,17 +901,7 @@ contains
                    ! distance is the one with positive sign on sqrt(quad)
 
                    d = (-k - sqrt(quad))/a
-                    if (d < ZERO) then
-                        d = INFINITY
-                    else
-                      ! check if we're on a cell-internal portion of the surface
-                      tmpd = d
-                      coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                      if (.not. on_cell_surf(cl)) then
-                        d = INFINITY
-                      end if
-                      coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                    end if
+                    if (d < ZERO) d = INFINITY
 
                 end if
              end if
@@ -1014,17 +950,7 @@ contains
                    ! distance is the one with positive sign on sqrt(quad)
 
                    d = (-k - sqrt(quad))/a
-                    if (d < ZERO) then
-                        d = INFINITY
-                    else
-                      ! check if we're on a cell-internal portion of the surface
-                      tmpd = d
-                      coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                      if (.not. on_cell_surf(cl)) then
-                        d = INFINITY
-                      end if
-                      coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                    end if
+                   if (d < ZERO) d = INFINITY
 
                 end if
              end if
@@ -1071,17 +997,7 @@ contains
                 ! one with positive sign on sqrt(quad)
 
                 d = -k - sqrt(quad)
-                if (d < ZERO) then
-                    d = INFINITY
-                else
-                  ! check if we're on a cell-internal portion of the surface
-                  tmpd = d
-                  coord % xyz  =  coord % xyz + tmpd * coord % uvw
-                  if (.not. on_cell_surf(cl)) then
-                    d = INFINITY
-                  end if
-                  coord % xyz  =  coord % xyz - tmpd * coord % uvw
-                end if
+                if (d < ZERO) d = INFINITY
 
              end if
 
