@@ -11,7 +11,7 @@ module global
   use particle_header,  only: Particle
   use plot_header,      only: Plot
   use source_header,    only: ExtSource
-  use tally_header,     only: TallyObject, TallyMap
+  use tally_header,     only: TallyObject, TallyMap, TallyScore
   use timing,           only: Timer
 
 #ifdef MPI
@@ -99,6 +99,14 @@ module global
   integer, allocatable :: analog_tallies(:)
   integer, allocatable :: tracklength_tallies(:)
   integer, allocatable :: current_tallies(:)
+
+  ! Global tallies
+  !   1) analog estimate of k-eff
+  !   2) collision estimate of k-eff
+  !   3) track-length estimate of k-eff
+  !   4) leakage fraction
+
+  type(TallyScore) :: global_tallies(N_GLOBAL_TALLIES)
 
   ! Tally map structure
   type(TallyMap), allocatable :: tally_maps(:)
