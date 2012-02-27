@@ -71,6 +71,8 @@ module geometry_header
      real(8), allocatable     :: limits(:) ! xmin,ymin,zmin,zmax,ymax,zmax bounds
      type(point), allocatable :: pointcloud(:) ! points on cell surface
      integer                  :: n_points = 0 ! number of points in pointcloud
+
+     integer, allocatable     :: rgb(:) ! plotting color
   end type Cell
 
   ! array index of universe 0

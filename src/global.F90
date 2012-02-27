@@ -9,6 +9,7 @@ module global
   use material_header,  only: Material
   use mesh_header,      only: StructuredMesh
   use particle_header,  only: Particle
+  use plot_header,      only: Plot
   use source_header,    only: ExtSource
   use tally_header,     only: TallyObject, TallyMap
   use timing,           only: Timer
@@ -38,6 +39,7 @@ module global
   type(Lattice),  allocatable, target :: lattices(:)
   type(Surface),  allocatable, target :: surfaces(:)
   type(Material), allocatable, target :: materials(:)
+  type(Plot),     allocatable, target :: plots(:)
 
   ! Size of main arrays
   integer :: n_cells     ! # of cells
@@ -45,6 +47,7 @@ module global
   integer :: n_lattices  ! # of lattices
   integer :: n_surfaces  ! # of surfaces
   integer :: n_materials ! # of materials
+  integer :: n_plots     ! # of plots
 
   ! These dictionaries provide a fast lookup mechanism -- the key is the
   ! user-specified identifier and the value is the index in the corresponding
@@ -180,12 +183,6 @@ module global
   ! PLOTTING VARIABLES
 
   logical :: plotting = .false.
-  real(8) :: plot_origin(3)
-  real(8) :: plot_width(3)
-  real(8) :: plot_basis(6)
-  real(8) :: pixel
-  real(8) :: plot_aspect
-  integer :: plot_resolution(3)
 
   ! ============================================================================
   ! HDF5 VARIABLES

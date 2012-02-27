@@ -240,7 +240,6 @@ contains
     integer, optional        :: search_cells(:)
 
     integer :: i                    ! index over cells
-    integer :: tmpu
     integer :: x                    ! x-index for lattice
     integer :: y                    ! y-index for lattice
     integer :: n                    ! number of cells to search
@@ -264,6 +263,8 @@ contains
        n = univ % n_cells
     end if
 
+
+    !write(*,*)p % coord % xyz
     do i = 1, n
        ! select cells based on whether we are searching a universe or a provided
        ! list of cells (this would be for lists of neighbor cells)
@@ -353,7 +354,7 @@ contains
                 p % coord % lattice_y = y
                 p % coord % universe  = lat % element(x,y)
              end if
- tmpu = p % coord % universe
+
              call find_cell(found)
              if (.not. found) exit
           end if

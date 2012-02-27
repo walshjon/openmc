@@ -1,4 +1,4 @@
-module plot
+module plotter
 
   use constants
   use error,           only: fatal_error
@@ -9,6 +9,8 @@ module plot
   use geometry_header, only: Universe, BASE_UNIVERSE
   use global
   use particle_header, only: LocalCoord, deallocate_coord
+  use plot_header
+  use RCImageBasic
   use source,          only: initialize_particle
   use string,          only: to_str
 
@@ -22,27 +24,155 @@ contains
 
   subroutine run_plot()
 
-    !TODO: deal with cell universes
+    integer :: i
+    type(rgbimage) :: img
+    type(Plot),    pointer :: pl => null()
 
-    write(*,*)"Sweeping x"
-    call find_cell_pointclouds(0)
-    write(*,*)"Sweeping y"
-    !call find_cell_pointclouds(1)
-    write(*,*)"Sweeping z"
-    !call find_cell_pointclouds(2)
+    do i=1,n_plots
+      pl => plots(i)
 
-    call dump_point_cloud()
-    !call dump_cell_quadrics()
+      if (pl % type == PLOT_TYPE_SLICE) then
+
+        ! create 2d image
+        call create_ppm(pl,img)
+        call output_ppm(pl,img)
+
+      else if (pl % type == PLOT_TYPE_POINTS) then
+        ! run 3d raytracer
+        write(*,*)"Sweeping x"
+        call find_cell_pointclouds(pl,0)
+        write(*,*)"Sweeping y"
+        call find_cell_pointclouds(pl,1)
+        write(*,*)"Sweeping z"
+        call find_cell_pointclouds(pl,2)
+
+        call dump_point_cloud(pl)
+
+
+      ! dump quadric surface info
+      !call dump_cell_quadrics()
+      end if
+    end do
 
   end subroutine run_plot
 
+!===============================================================================
+! create_ppm
+!===============================================================================
+  subroutine create_ppm(pl,img)
+
+    type(Plot),         pointer :: pl
+    type(rgbimage), intent(out) :: img
+
+    integer   :: x, y
+    integer   :: r,g,b
+    real(8)   :: x_pixel, y_pixel
+    real(8)   :: xyz(3)
+    logical   :: found_cell
+    type(rgb) :: color
+    type(Cell),       pointer :: c    => null()
+
+    call init_img(img)
+
+    if (pl % basis == PLOT_BASIS_XY) then
+      x_pixel = pl % width(1)/dble(pl % pixels(1))
+      y_pixel = pl % width(2)/dble(pl % pixels(2))
+      xyz(1) = pl % origin(1) - pl % width(1) / 2.0
+      xyz(2) = pl % origin(2) + pl % width(2) / 2.0
+      xyz(3) = pl % origin(3)
+      call alloc_img(img, pl % pixels(1), pl % pixels(2))
+    else
+      message = "unimplemented plot slice basis" // trim(to_str(pl % basis))
+      call fatal_error()
+    end if
+
+    ! allocate and initialize particle
+    allocate(p)
+    call initialize_particle()
+    p % coord % xyz = xyz
+    p % coord % uvw = (/ 1, 0, 0 /)
+    p % coord % universe = BASE_UNIVERSE
+
+    do y=1, img%height
+      do x=1, img%width
+
+        call deallocate_coord(p % coord0 % next)
+        p % coord => p % coord0
+
+        call find_cell(found_cell)
+
+        if (.not. found_cell) then
+          r = 0
+          g = 0
+          b = 0
+        else
+          c => cells(p % coord % cell)
+          if (pl % color == PLOT_COLOR_MATS) then
+            r = materials(c % material) % rgb(1)
+            g = materials(c % material) % rgb(2)
+            b = materials(c % material) % rgb(3)
+          else if (pl % color == PLOT_COLOR_CELLS) then
+            r = c % rgb(1)
+            g = c % rgb(2)
+            b = c % rgb(3)
+          else
+            r = 0
+            g = 0
+            b = 0
+          end if
+        end if
+
+        call set_color(color, r, g, b)
+        call put_pixel(img, x, y, color)
+
+        p % coord0 % xyz(1) = p % coord0 % xyz(1) + x_pixel
+      end do
+
+      p % coord0 % xyz(1) = xyz(1)
+      p % coord0 % xyz(2) = p % coord0 % xyz(2) - y_pixel
+    end do
+
+  end subroutine create_ppm
+
+
+!===============================================================================
+! output_ppm
+!===============================================================================
+  subroutine output_ppm(pl,img)
+
+    type(Plot),        pointer :: pl
+    type(rgbimage), intent(in) :: img
+
+    integer :: i, j
+    character(MAX_LINE_LEN)    :: path_plot ! unit for binary plot file
+
+    path_plot = trim(path_input) // "slice" // trim(to_str(pl % id)) // ".ppm"
+    open(UNIT=UNIT_PLOT, FILE=path_plot)
+
+    write(UNIT_PLOT, '(A2)') 'P6'
+    write(UNIT_PLOT, '(I0,'' '',I0)') img%width, img%height
+    write(UNIT_PLOT, '(A)') '255'
+ 
+    do j=1, img%height
+       do i=1, img%width
+          write(UNIT_PLOT, '(3A1)', advance='no') achar(img%red(i,j)), &
+                                                       achar(img%green(i,j)), &
+                                                       achar(img%blue(i,j))
+       end do
+    end do
+
+    ! Close plot file
+    close(UNIT=UNIT_PLOT)
+ 
+  end subroutine output_ppm
 
 
 !===============================================================================
 ! FIND_CELL_POINTCLOUDS
 !===============================================================================
-  subroutine find_cell_pointclouds(basis)
+  subroutine find_cell_pointclouds(pl,basis)
 
+    type(Plot), pointer :: pl
     integer, intent(in) :: basis ! sweep direction 0: xy, 1: xz, 2: yz
 
     real(8) :: direction(3)    ! sweep direction
@@ -60,44 +190,42 @@ contains
     type(Cell),       pointer :: c    => null()
     type(LocalCoord), pointer :: coord => null()
 
-
-
     if (basis == 0 ) then
       direction = (/ 1, 0, 0 /)
       trackI = 1 ! x
       innerI = 2 ! y
       outerI = 3 ! z
       ! Determine bounding x and y coordinates for plot
-      xyz(1) = plot_origin(1) - plot_width(1) / 2.0
-      xyz(2) = plot_origin(2) + plot_width(2) / 2.0
-      xyz(3) = plot_origin(3) + plot_width(3) / 2.0
-      last_track_coord = plot_origin(1) + plot_width(1) / 2.0
-      last_inner_coord = plot_origin(2) - plot_width(2) / 2.0
-      last_outer_coord = plot_origin(3) - plot_width(3) / 2.0
+      xyz(1) = pl % origin(1) - pl % width(1) / 2.0
+      xyz(2) = pl % origin(2) + pl % width(2) / 2.0
+      xyz(3) = pl % origin(3) + pl % width(3) / 2.0
+      last_track_coord = pl % origin(1) + pl % width(1) / 2.0
+      last_inner_coord = pl % origin(2) - pl % width(2) / 2.0
+      last_outer_coord = pl % origin(3) - pl % width(3) / 2.0
     else if (basis == 1) then
       direction = (/ 0, 1, 0 /)
       trackI = 2 ! y
       innerI = 1 ! x
       outerI = 3 ! z
       ! Determine bounding x and y coordinates for plot
-      xyz(1) = plot_origin(1) + plot_width(1) / 2.0
-      xyz(2) = plot_origin(2) - plot_width(2) / 2.0
-      xyz(3) = plot_origin(3) + plot_width(3) / 2.0
-      last_inner_coord = plot_origin(1) - plot_width(1) / 2.0
-      last_track_coord = plot_origin(2) + plot_width(2) / 2.0
-      last_outer_coord = plot_origin(3) - plot_width(3) / 2.0
+      xyz(1) = pl % origin(1) + pl % width(1) / 2.0
+      xyz(2) = pl % origin(2) - pl % width(2) / 2.0
+      xyz(3) = pl % origin(3) + pl % width(3) / 2.0
+      last_inner_coord = pl % origin(1) - pl % width(1) / 2.0
+      last_track_coord = pl % origin(2) + pl % width(2) / 2.0
+      last_outer_coord = pl % origin(3) - pl % width(3) / 2.0
     else if (basis == 2) then
       direction = (/ 0, 0, 1 /)
       trackI = 3 ! z
       innerI = 2 ! y 
       outerI = 1 ! x
       ! Determine bounding x and y coordinates for plot
-      xyz(1) = plot_origin(1) + plot_width(1) / 2.0
-      xyz(2) = plot_origin(2) - plot_width(2) / 2.0
-      xyz(3) = plot_origin(3) + plot_width(3) / 2.0
-      last_outer_coord = plot_origin(1) - plot_width(1) / 2.0
-      last_inner_coord = plot_origin(3) - plot_width(3) / 2.0
-      last_track_coord = plot_origin(2) + plot_width(2) / 2.0
+      xyz(1) = pl % origin(1) + pl % width(1) / 2.0
+      xyz(2) = pl % origin(2) - pl % width(2) / 2.0
+      xyz(3) = pl % origin(3) + pl % width(3) / 2.0
+      last_outer_coord = pl % origin(1) - pl % width(1) / 2.0
+      last_inner_coord = pl % origin(3) - pl % width(3) / 2.0
+      last_track_coord = pl % origin(2) + pl % width(2) / 2.0
     else
       return
     end if
@@ -138,7 +266,7 @@ contains
                p % coord0 % xyz(trackI) = last_track_coord
 
                ! Move to next ray start position
-               xyz(innerI) = xyz(innerI) - plot_aspect
+               xyz(innerI) = xyz(innerI) - pl % aspect
 
                cycle
             end if
@@ -218,26 +346,26 @@ contains
          end do ! (end do while particle is alive)
 
          ! Move y-coordinate to next ray start position
-         xyz(innerI) = xyz(innerI) - plot_aspect
+         xyz(innerI) = xyz(innerI) - pl % aspect
 
 
       end do
 
       if (basis == 0) then
         ! Move z-coordinate to next position and reset x and y
-        xyz(1) = plot_origin(1) - plot_width(1) / 2.0
-        xyz(2) = plot_origin(2) + plot_width(2) / 2.0
-        xyz(3) = xyz(3) - plot_aspect
+        xyz(1) = pl % origin(1) - pl % width(1) / 2.0
+        xyz(2) = pl % origin(2) + pl % width(2) / 2.0
+        xyz(3) = xyz(3) - pl % aspect
       else if (basis == 1) then
         ! Move z-coordinate to next position and reset x and y
-        xyz(1) = plot_origin(1) + plot_width(1) / 2.0
-        xyz(2) = plot_origin(2) - plot_width(2) / 2.0
-        xyz(3) = xyz(3) - plot_aspect     
+        xyz(1) = pl % origin(1) + pl % width(1) / 2.0
+        xyz(2) = pl % origin(2) - pl % width(2) / 2.0
+        xyz(3) = xyz(3) - pl % aspect     
       else if (basis == 2) then
         ! Move x-coordinate to next position and reset y and z
-        xyz(2) = plot_origin(2) + plot_width(2) / 2.0
-        xyz(3) = plot_origin(3) - plot_width(3) / 2.0
-        xyz(1) = xyz(1) - plot_aspect    
+        xyz(2) = pl % origin(2) + pl % width(2) / 2.0
+        xyz(3) = pl % origin(3) - pl % width(3) / 2.0
+        xyz(1) = xyz(1) - pl % aspect    
       end if
 
     end do
@@ -361,13 +489,15 @@ contains
 !===============================================================================
 ! DUMP_POINT_CLOUD
 !===============================================================================
-  subroutine dump_point_cloud()
+  subroutine dump_point_cloud(pl)
+
+    type(Plot),        pointer :: pl
 
     integer                     :: n, t
     character(MAX_LINE_LEN)     :: path_plot ! unit for binary plot file
 
     ! Open plot file for binary writing
-    path_plot = trim(path_input) // "plot.out"
+    path_plot = trim(path_input) // "points" // trim(to_str(pl % id)) // ".out"
     open(UNIT=UNIT_PLOT, FILE=path_plot, STATUS="replace", ACCESS="stream")
 
     do n=1,n_cells
@@ -409,7 +539,7 @@ contains
           write(UNIT=UNIT_PLOT)c%limits
           write(UNIT=UNIT_PLOT)c%n_surfaces
           do s=1,c%n_surfaces
-            if (c%surfaces(s) >= OP_DIFFERENCE) cycle ! TODO: skipped operators for now -- we *will* need this information
+            if (c%surfaces(s) >= OP_DIFFERENCE) cycle ! TODO: skipped operators
             surf => surfaces(abs(c%surfaces(s)))
             write(UNIT=UNIT_PLOT)surf%type
             write(UNIT=UNIT_PLOT)-1*sign(1,c%surfaces(s))
@@ -425,4 +555,4 @@ contains
   end subroutine dump_cell_quadrics
 
 
-end module plot
+end module plotter

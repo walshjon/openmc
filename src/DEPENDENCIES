@@ -68,6 +68,7 @@ global.o: geometry_header.o
 global.o: material_header.o
 global.o: mesh_header.o
 global.o: particle_header.o
+global.o: plot_header.o
 global.o: source_header.o
 global.o: tally_header.o
 global.o: timing.o
@@ -180,6 +181,8 @@ plot.o: geometry.o
 plot.o: geometry_header.o
 plot.o: global.o
 plot.o: particle_header.o
+plot.o: plot_header.o
+plot.o: ppmlib.o
 plot.o: source.o
 
 search.o: constants.o
