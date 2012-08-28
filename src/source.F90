@@ -72,6 +72,10 @@ contains
     real(8) :: p_max(3)   ! maximum coordinates of source
     real(8) :: a          ! Arbitrary parameter 'a'
     real(8) :: b          ! Arbitrary parameter 'b'
+    real(8) :: x          ! x value sampled
+    real(8) :: y          ! y value sampled
+    real(8) :: Bu         ! geometric buckling
+    logical :: resample   ! resample x
 
     ! Set weight to one by default
     site % wgt = ONE
@@ -88,6 +92,28 @@ contains
     case (SRC_SPACE_POINT)
        ! Point source
        site % xyz = external_source % params_space
+
+    case (SRC_SPACE_BUCKLEDX)
+       ! Coordinates sampled uniformly over a box
+       p_min = external_source % params_space(1:3)
+       p_max = external_source % params_space(4:6)
+       r = (/ (prn(), i = 1,3) /)
+       site % xyz = p_min + r*(p_max - p_min)
+
+       ! begin sampling cosine
+       Bu = PI/(p_max(1) - p_min(1))
+       resample = .TRUE.
+       do while(resample)
+
+         r = (/ (prn(), i = 1,3) /)
+         x = p_min(1) + r(1)*(p_max(1) - p_min(1))
+         y = cos(Bu*x)
+
+        if (r(2) < y) resample = .FALSE.
+
+       end do
+
+       site % xyz(1) = x
 
     end select
     

@@ -212,6 +212,9 @@ contains
           case ('point')
              external_source % type_space = SRC_SPACE_POINT
              coeffs_reqd = 3
+          case ('buckledx')
+             external_source % type_space = SRC_SPACE_BUCKLEDX
+             coeffs_reqd = 6
           case default
              message = "Invalid spatial distribution for external source: " &
                   // trim(source_ % space % type)
