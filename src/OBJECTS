@@ -51,5 +51,6 @@ source_header.o \
 state_point.o \
 string.o \
 tally.o \
+tally_diffusion.o \
 tally_header.o \
 timing.o
