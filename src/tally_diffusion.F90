@@ -4,10 +4,19 @@ module tally_diffusion
 
   ! module options
   private
-  public :: create_diffusion_tally
+  public :: create_diffusion_tally, calculate_diffusion
 
   ! number of energy groups
   integer, parameter :: N_GRPS = 70
+
+  ! set up vectors for tallies
+  real(8), allocatable :: flux(:,:,:,:)
+  real(8), allocatable :: total(:,:,:,:)
+  real(8), allocatable :: totalH1(:,:,:,:)
+  real(8), allocatable :: p1scatt(:,:,:,:)
+  real(8), allocatable :: p1scattH1(:,:,:,:)
+  real(8), allocatable :: diffcoef(:,:,:,:)
+  real(8), allocatable :: diffcoef2(:,:,:,:)
 
   ! energy grid for correction
   real(8), parameter :: EGRID(N_GRPS+1) = (/ 0.0_8,    &
@@ -259,5 +268,131 @@ contains
     n_user_tallies = n_user_tallies + 1
 
   end subroutine create_diffusion_tally
+
+!===============================================================================
+! CALCULATE_DIFFUSION
+!===============================================================================
+
+  subroutine calculate_diffusion()
+
+    use datatypes,     only: dict_get_key
+    use global,        only: meshes, tallies, difcof_mesh, n_user_tallies, &
+                             mesh_dict
+    use mesh,          only: mesh_indices_to_bin
+    use mesh_header,   only: StructuredMesh
+    use tally_header,  only: TallyObject
+
+    ! local variables
+    integer :: g                    ! iteration counter for groups
+    integer :: i                    ! iteration counter for x
+    integer :: j                    ! iteration counter for y
+    integer :: k                    ! iteration counter for z
+    integer :: nx                   ! number of mesh cells in z direction
+    integer :: ny                   ! number of mesh cells in y direction
+    integer :: nz                   ! number of mesh cells in x direction
+    integer :: i_mesh               ! mesh index
+    integer :: ijk(3)               ! indices for mesh cells
+    integer :: filter_index         ! index to pull from tally object
+    integer :: score_index          ! index to pull from tally object
+    integer :: bins(N_FILTER_TYPES) ! bins for filters
+    integer :: i_score              ! score number
+    integer :: i_nuclide            ! nuclide number
+    type(StructuredMesh), pointer :: m => null()
+    type(TallyObject), pointer :: t => null()
+
+    ! set pointers
+    i_mesh = dict_get_key(mesh_dict, difcof_mesh)
+    m => meshes(i_mesh)
+    t => tallies(n_user_tallies)
+
+    ! initialize dimensions of mesh
+    nx = 1
+    ny = 1
+    nz = 1
+
+    ! extract dimensions from mesh
+    nx = m % dimension(1)
+    ny = m % dimension(2)
+    if (size(m % dimension) > 2) nz = m % dimension(3)
+
+    ! allocate variables
+    allocate(flux(N_GRPS,nx,ny,nz))
+    allocate(total(N_GRPS,nx,ny,nz))
+    allocate(totalH1(N_GRPS,nx,ny,nz))
+    allocate(p1scatt(N_GRPS,nx,ny,nz))
+    allocate(p1scattH1(N_GRPS,nx,ny,nz))
+    allocate(diffcoef(N_GRPS,nx,ny,nz))
+    allocate(diffcoef2(2,nx,ny,nz))
+
+    ! begin loop around space and energy
+    ZLOOP: do k = 1,nz
+
+      YLOOP: do j = 1,ny
+
+        XLOOP: do i = 1,nx
+
+          GLOOP: do g = 1,N_GRPS
+
+            ! reset all bins to 1
+            bins = 1     
+
+            ! set ijk as mesh indices
+            ijk = (/i,j,k/)
+            bins(FILTER_MESH) = mesh_indices_to_bin(m,ijk)
+
+            ! apply energy in filter
+            bins(FILTER_ENERGYIN) = g
+
+            ! calculate filter index from bins
+            filter_index = sum((bins - 1) * t%stride) + 1
+
+            ! calculate score index for H-1 total
+            i_nuclide = 1
+            i_score = 2
+            score_index = (i_nuclide - 1)*t % n_score_bins + i_score 
+            totalH1(g,i,j,k) = t % scores(score_index,filter_index) % sum 
+
+            ! calculate score index for H-1 p1scatt
+            i_nuclide = 1
+            i_score = 3
+            score_index = (i_nuclide - 1)*t % n_score_bins + i_score
+            p1scattH1(g,i,j,k) = t % scores(score_index,filter_index) % sum
+
+            ! calculate score index for all nuclides flux
+            i_nuclide = 2
+            i_score = 1
+            score_index = (i_nuclide - 1)*t % n_score_bins + i_score
+            flux(g,i,j,k) = t % scores(score_index,filter_index) % sum
+
+            ! calculate score index for all nuclides total 
+            i_nuclide = 2
+            i_score = 2
+            score_index = (i_nuclide - 1)*t % n_score_bins + i_score
+            total(g,i,j,k) = t % scores(score_index,filter_index) % sum
+
+            ! calculate score index for all nuclides flux
+            i_nuclide = 2
+            i_score = 3
+            score_index = (i_nuclide - 1)*t % n_score_bins + i_score
+            p1scatt(g,i,j,k) = t % scores(score_index,filter_index) % sum 
+
+          end do GLOOP
+
+        end do XLOOP
+
+      end do YLOOP
+
+    end do ZLOOP
+
+    ! deallocate variables
+    deallocate(flux)
+    deallocate(total)
+    deallocate(totalH1)
+    deallocate(p1scatt)
+    deallocate(p1scattH1)
+    deallocate(diffcoef)
+    deallocate(diffcoef2)
+
+  end subroutine calculate_diffusion
 
 end module tally_diffusion
