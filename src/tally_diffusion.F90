@@ -4,6 +4,7 @@ module tally_diffusion
 
   ! module options
   private
+  public :: create_diffusion_tally
 
   ! number of energy groups
   integer, parameter :: N_GRPS = 70
@@ -160,22 +161,25 @@ contains
 ! CREATE_DIFFUSION_TALLY
 !===============================================================================
 
-  subroutine create_diffusion_tally(t,m)
+  subroutine create_diffusion_tally(t)
 
     use datatypes,     only: dict_has_key, dict_get_key
     use error,         only: fatal_error
-    use global,        only: default_xs, nuclide_dict, message
+    use global,        only: default_xs, nuclide_dict, message, &
+                             difcof_mesh, mesh_dict, meshes, &
+                             n_user_analog_tallies
     use mesh_header,   only: StructuredMesh
     use tally_header,  only: TallyObject
 
     ! arguments
-    type(TallyObject), pointer :: t
-    type(StructuredMesh), pointer :: m
+    type(TallyObject) :: t
 
     ! local variables
     integer :: n_filters
     integer :: filters(N_FILTER_TYPES)
-    character(MAX_WORD_LEN) :: hydrogen 
+    integer :: i_mesh 
+    character(MAX_WORD_LEN) :: hydrogen
+    type(StructuredMesh), pointer :: m => null()
 
     ! check if hydogen is included in problem
     hydrogen = "H-1" // "." // default_xs
@@ -183,6 +187,15 @@ contains
       message = "Could not find nuclide " // trim(hydrogen) // &
                 " needed for diffusion coefficients."
       call fatal_error()
+    end if
+
+    ! check if mesh exists
+    if (.not. dict_has_key(mesh_dict, difcof_mesh)) then
+      message = "Mesh for diffusion coefficient does not exist."
+      call fatal_error()
+    else
+      i_mesh = dict_get_key(mesh_dict, difcof_mesh)
+      m => meshes(i_mesh)
     end if
 
     ! allocate arrays for number of bins and stride in scores array

@@ -136,6 +136,9 @@ module global
   ! Use confidence intervals for results instead of standard deviations
   logical :: confidence_intervals = .false.
 
+  ! Tally in-scatter corrected diffusion coefficient (integer is mesh id)
+  integer :: difcof_mesh = 0
+
   ! ============================================================================
   ! USER TALLY-RELATED VARIABLES
 

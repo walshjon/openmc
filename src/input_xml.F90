@@ -12,6 +12,7 @@ module input_xml
   use random_lcg,      only: prn
   use string,          only: lower_case, to_str, str_to_int, str_to_real, &
                              split_string, starts_with, ends_with
+  use tally_diffusion, only: create_diffusion_tally
   use tally_header,    only: TallyObject
 
   implicit none
@@ -1240,6 +1241,13 @@ contains
        end if
     end if
 
+    ! Check for <difcof_mesh> setting
+    if (difcof_mesh_ > 0) then
+      difcof_mesh = difcof_mesh_
+      n_user_tallies = n_user_tallies + 1
+      n_tallies = n_tallies + 1
+    end if
+
     ! Allocate tally array
     if (n_tallies > 0) allocate(tallies(n_tallies))
 
@@ -1770,6 +1778,10 @@ contains
           n_user_current_tallies = n_user_current_tallies + 1
        end if
     end do
+
+    ! Check for diffusion coefficient tally
+    if (difcof_mesh > 0) &
+      call create_diffusion_tally(tallies(n_user_tallies))
 
     ! Determine number of types of tallies
     if (cmfd_run) then

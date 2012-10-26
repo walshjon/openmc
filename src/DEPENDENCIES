@@ -213,6 +213,7 @@ input_xml.o: output.o
 input_xml.o: plot_header.o
 input_xml.o: random_lcg.o
 input_xml.o: string.o
+input_xml.o: tally_diffusion.o
 input_xml.o: tally_header.o
 input_xml.o: templates/cross_sections_t.o
 input_xml.o: templates/geometry_t.o
