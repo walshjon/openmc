@@ -1,7 +1,15 @@
 module tally_diffusion
 
+  use constants
+
+  ! module options
+  private
+
+  ! number of energy groups
+  integer, parameter :: N_GRPS = 70
+
   ! energy grid for correction
-  real(8), parameter :: EGRID(71) = (/ 0.0_8,    &
+  real(8), parameter :: EGRID(N_GRPS+1) = (/ 0.0_8,    &
                                    5.0000e-09_8, &
                                    1.0000e-08_8, &
                                    1.5000e-08_8, &
@@ -74,7 +82,7 @@ module tally_diffusion
                                    1.0000e+01_8 /)
 
   ! correction curve 
-  real(8), parameter :: inscatt(70) = (/               &
+  real(8), parameter :: inscatt(N_GRPS) = (/               &
                                          9.5199e-01_8, &
                                          1.0351e+00_8, &
                                          9.3946e-01_8, &
@@ -145,5 +153,96 @@ module tally_diffusion
                                          6.5621e-01_8, &
                                          7.5675e-01_8, &
                                          8.3578e-01_8 /)
+
+contains
+
+!===============================================================================
+! CREATE_DIFFUSION_TALLY
+!===============================================================================
+
+  subroutine create_diffusion_tally(t,m)
+
+    use datatypes,     only: dict_has_key, dict_get_key
+    use error,         only: fatal_error
+    use global,        only: default_xs, nuclide_dict, message
+    use mesh_header,   only: StructuredMesh
+    use tally_header,  only: TallyObject
+
+    ! arguments
+    type(TallyObject), pointer :: t
+    type(StructuredMesh), pointer :: m
+
+    ! local variables
+    integer :: n_filters
+    integer :: filters(N_FILTER_TYPES)
+    character(MAX_WORD_LEN) :: hydrogen 
+
+    ! check if hydogen is included in problem
+    hydrogen = "H-1" // "." // default_xs
+    if (.not. dict_has_key(nuclide_dict, hydrogen)) then
+      message = "Could not find nuclide " // trim(hydrogen) // &
+                " needed for diffusion coefficients."
+      call fatal_error()
+    end if
+
+    ! allocate arrays for number of bins and stride in scores array
+    allocate(t % n_filter_bins(N_FILTER_TYPES))
+    allocate(t % stride(N_FILTER_TYPES))
+
+    ! initialize number of bins and stride
+    t % n_filter_bins = 0
+    t % stride = 0
+
+    ! initialize filters
+    n_filters = 0
+    filters = 0
+
+    ! set tally type to volume
+    t % type = TALLY_VOLUME
+
+    ! set estimator to analog
+    t % estimator = ESTIMATOR_ANALOG
+
+    ! set tally id
+    t % id = 900
+
+    ! set tally label
+    t % label = 'DIFFUSION COEFFICIENT'
+
+    ! set mesh filter bins
+    t % n_filter_bins(FILTER_MESH) = t % n_filter_bins(FILTER_MESH) + &
+                                     product(m % dimension)
+    n_filters = n_filters + 1
+    filters(n_filters) = FILTER_MESH
+
+    ! set energy in filter bins
+    allocate(t % energy_in(N_GRPS+1))
+    t % energy_in = EGRID
+    t % n_filter_bins(FILTER_ENERGYIN) = N_GRPS
+    n_filters = n_filters + 1
+    filters(n_filters) = FILTER_ENERGYIN
+
+    ! allocate and set filters
+    t % n_filters = n_filters
+    allocate(t % filters(n_filters))
+    t % filters = filters(1:n_filters)
+
+    ! set nuclide data
+    allocate(t % nuclide_bins(2)) ! 1 for hydrogen and 2 for total
+    t % n_nuclide_bins = 2
+    t % nuclide_bins(1) = dict_get_key(nuclide_dict, hydrogen)
+    t % nuclide_bins(2) = -1
+
+    ! set scores
+    allocate(t % score_bins(3))
+    t % n_score_bins = 3
+    t % score_bins(1) = SCORE_FLUX
+    t % score_bins(2) = SCORE_TOTAL
+    t % score_bins(3) = SCORE_SCATTER_1
+
+    ! increment number of analog tallies
+    n_user_analog_tallies = n_user_analog_tallies + 1
+
+  end subroutine create_diffusion_tally
 
 end module tally_diffusion

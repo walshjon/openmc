@@ -349,4 +349,10 @@ tally.o: search.o
 tally.o: string.o
 tally.o: tally_header.o
 
+tally_diffusion.o: datatypes.o
+tally_diffusion.o: error.o
+tally_diffusion.o: global.o
+tally_diffusion.o: mesh_header.o
+tally_diffusion.o: tally_header.o
+
 timing.o: constants.o
