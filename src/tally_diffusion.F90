@@ -167,7 +167,7 @@ contains
     use error,         only: fatal_error
     use global,        only: default_xs, nuclide_dict, message, &
                              difcof_mesh, mesh_dict, meshes, &
-                             n_user_analog_tallies
+                             n_user_analog_tallies, n_user_tallies
     use mesh_header,   only: StructuredMesh
     use tally_header,  only: TallyObject
 
@@ -197,6 +197,7 @@ contains
       i_mesh = dict_get_key(mesh_dict, difcof_mesh)
       m => meshes(i_mesh)
     end if
+    t % mesh = difcof_mesh
 
     ! allocate arrays for number of bins and stride in scores array
     allocate(t % n_filter_bins(N_FILTER_TYPES))
@@ -255,6 +256,7 @@ contains
 
     ! increment number of analog tallies
     n_user_analog_tallies = n_user_analog_tallies + 1
+    n_user_tallies = n_user_tallies + 1
 
   end subroutine create_diffusion_tally
 

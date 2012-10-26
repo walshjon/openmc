@@ -1244,7 +1244,6 @@ contains
     ! Check for <difcof_mesh> setting
     if (difcof_mesh_ > 0) then
       difcof_mesh = difcof_mesh_
-      n_user_tallies = n_user_tallies + 1
       n_tallies = n_tallies + 1
     end if
 
@@ -1781,7 +1780,7 @@ contains
 
     ! Check for diffusion coefficient tally
     if (difcof_mesh > 0) &
-      call create_diffusion_tally(tallies(n_user_tallies))
+      call create_diffusion_tally(tallies(n_user_tallies+1))
 
     ! Determine number of types of tallies
     if (cmfd_run) then
