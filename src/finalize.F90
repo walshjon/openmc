@@ -7,7 +7,7 @@ module finalize
   use output,         only: print_runtime
   use tally,          only: write_tallies, tally_statistics
   use timing,         only: timer_start, timer_stop
-
+use tally_diffusion
 #ifdef MPI
   use mpi
 #endif
@@ -34,6 +34,7 @@ contains
        if (output_tallies) then
           ! Calculate statistics for tallies and write to tallies.out
           if (master) call tally_statistics()
+          if (master) call calculate_diffusion()
           if (master) call write_tallies()
        end if
     end if

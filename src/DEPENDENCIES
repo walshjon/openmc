@@ -106,7 +106,6 @@ criticality.o: state_point.o
 criticality.o: string.o
 criticality.o: tally.o
 criticality.o: timing.o
-
 datatypes.o: datatypes_header.o
 
 doppler.o: constants.o
@@ -127,6 +126,7 @@ finalize.o: hdf5_interface.o
 finalize.o: output.o
 finalize.o: tally.o
 finalize.o: timing.o
+      finalize.o: tally_diffusion.o
 
 fission.o: ace_header.o
 fission.o: constants.o
@@ -353,6 +353,7 @@ tally.o: tally_header.o
 tally_diffusion.o: datatypes.o
 tally_diffusion.o: error.o
 tally_diffusion.o: global.o
+tally_diffusion.o: mesh.o
 tally_diffusion.o: mesh_header.o
 tally_diffusion.o: tally_header.o
 

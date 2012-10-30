@@ -17,6 +17,8 @@ module tally_diffusion
   real(8), allocatable :: p1scattH1(:,:,:,:)
   real(8), allocatable :: diffcoef(:,:,:,:)
   real(8), allocatable :: diffcoef2(:,:,:,:)
+  real(8), allocatable :: trans(:,:,:,:)
+  real(8), allocatable :: transH1(:,:,:,:)
 
   ! energy grid for correction
   real(8), parameter :: EGRID(N_GRPS+1) = (/ 0.0_8,    &
@@ -323,6 +325,8 @@ contains
     allocate(p1scattH1(N_GRPS,nx,ny,nz))
     allocate(diffcoef(N_GRPS,nx,ny,nz))
     allocate(diffcoef2(2,nx,ny,nz))
+    allocate(trans(N_GRPS,nx,ny,nz))
+    allocate(transH1(N_GRPS,nx,ny,nz))
 
     ! begin loop around space and energy
     ZLOOP: do k = 1,nz
@@ -378,12 +382,38 @@ contains
 
           end do GLOOP
 
+          ! compute transport reaction rate
+          trans(:,i,j,k) = total(:,i,j,k) - p1scatt(:,i,j,k)
+          transH1(:,i,j,k) = totalH1(:,i,j,k) - p1scattH1(:,i,j,k)
+
+          ! subtract out hydrogen from transport reaction rate
+          trans(:,i,j,k) = trans(:,i,j,k) - transH1(:,i,j,k)
+
+          ! apply in-scatter correction curve to hydrogen total
+          transH1(:,i,j,k) = totalH1(:,i,j,k)*inscatt
+
+          ! add in corrected hydrogen to transport reaction rate
+          trans(:,i,j,k) = trans(:,i,j,k) + transH1(:,i,j,k)
+
+          ! compute transport cross section
+          trans(:,i,j,k) = trans(:,i,j,k) / flux(:,i,j,k)
+
+          ! compute diffusion coefficients
+          diffcoef(:,i,j,k) = 1/(3*trans(:,i,j,k))
+
+          ! collapse diffusion coefficient
+          diffcoef2(2,i,j,k) = sum(diffcoef(1:24,i,j,k)*flux(1:24,i,j,k)) / &
+                               sum(flux(1:24,i,j,k))
+          diffcoef2(1,i,j,k) = sum(diffcoef(25:70,i,j,k)*flux(25:70,i,j,k)) / &
+                               sum(flux(25:70,i,j,k))
+
         end do XLOOP
 
       end do YLOOP
 
     end do ZLOOP
-
+print *,'DiFF:'
+print *,diffcoef2
     ! deallocate variables
     deallocate(flux)
     deallocate(total)
@@ -392,6 +422,8 @@ contains
     deallocate(p1scattH1)
     deallocate(diffcoef)
     deallocate(diffcoef2)
+    deallocate(trans)
+    deallocate(transH1)
 
   end subroutine calculate_diffusion
 
