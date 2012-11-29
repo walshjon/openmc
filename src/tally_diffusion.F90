@@ -178,19 +178,20 @@ contains
     use error,         only: fatal_error
     use global,        only: default_xs, nuclide_dict, message, &
                              difcof_mesh, mesh_dict, meshes, &
-                             n_user_analog_tallies, n_user_tallies
+                             n_user_analog_tallies, n_user_tallies, &
+                             analog_tallies
     use mesh_header,   only: StructuredMesh
-    use tally_header,  only: TallyObject
+    use tally_header,  only: TallyObject, TallyScore, TallyFilter
 
     ! arguments
     type(TallyObject) :: t
 
     ! local variables
     integer :: n_filters
-    integer :: filters(N_FILTER_TYPES)
     integer :: i_mesh 
     character(MAX_WORD_LEN) :: hydrogen
     type(StructuredMesh), pointer :: m => null()
+    type(TallyFilter) :: filters(N_FILTER_TYPES)
 
     ! check if hydogen is included in problem
     hydrogen = "H-1" // "." // default_xs
@@ -208,19 +209,9 @@ contains
       i_mesh = dict_get_key(mesh_dict, difcof_mesh)
       m => meshes(i_mesh)
     end if
-    t % mesh = difcof_mesh
-
-    ! allocate arrays for number of bins and stride in scores array
-    allocate(t % n_filter_bins(N_FILTER_TYPES))
-    allocate(t % stride(N_FILTER_TYPES))
-
-    ! initialize number of bins and stride
-    t % n_filter_bins = 0
-    t % stride = 0
 
     ! initialize filters
     n_filters = 0
-    filters = 0
 
     ! set tally type to volume
     t % type = TALLY_VOLUME
@@ -235,17 +226,20 @@ contains
     t % label = 'DIFFUSION COEFFICIENT'
 
     ! set mesh filter bins
-    t % n_filter_bins(FILTER_MESH) = t % n_filter_bins(FILTER_MESH) + &
-                                     product(m % dimension)
     n_filters = n_filters + 1
-    filters(n_filters) = FILTER_MESH
+    filters(n_filters) % type = FILTER_MESH
+    filters(n_filters) % n_bins = product(m % dimension)
+    allocate(filters(n_filters) % int_bins(1))
+    filters(n_filters) % int_bins(1) = i_mesh
+    t % find_filter(FILTER_MESH) = n_filters
 
     ! set energy in filter bins
-    allocate(t % energy_in(N_GRPS+1))
-    t % energy_in = EGRID
-    t % n_filter_bins(FILTER_ENERGYIN) = N_GRPS
     n_filters = n_filters + 1
-    filters(n_filters) = FILTER_ENERGYIN
+    filters(n_filters) % type = FILTER_ENERGYIN
+    filters(n_filters) % n_bins = N_GRPS
+    allocate(filters(n_filters) % real_bins(N_GRPS+1))
+    filters(n_filters) % real_bins = EGRID
+    t % find_filter(FILTER_ENERGYIN) = n_filters
 
     ! allocate and set filters
     t % n_filters = n_filters
@@ -268,6 +262,9 @@ contains
     ! increment number of analog tallies
     n_user_analog_tallies = n_user_analog_tallies + 1
     n_user_tallies = n_user_tallies + 1
+
+    ! increment the appropriate index and set pointer
+    analog_tallies(n_user_analog_tallies) = n_user_tallies
 
   end subroutine create_diffusion_tally
 
@@ -299,13 +296,20 @@ contains
     integer :: bins(N_FILTER_TYPES) ! bins for filters
     integer :: i_score              ! score number
     integer :: i_nuclide            ! nuclide number
+    integer :: i_filter_mesh        ! index for mesh filter
+    integer :: i_filter_ein         ! index for incoming energy filter
+    integer :: i_filter_nuclide     ! index for nuclide filter
     type(StructuredMesh), pointer :: m => null()
     type(TallyObject), pointer :: t => null()
 
     ! set pointers
-    i_mesh = dict_get_key(mesh_dict, difcof_mesh)
-    m => meshes(i_mesh)
     t => tallies(n_user_tallies)
+    i_mesh = t % filters(t % find_filter(FILTER_MESH)) % int_bins(1)
+    m => meshes(i_mesh)
+
+    ! set up filters
+    i_filter_mesh = t % find_filter(FILTER_MESH)
+    i_filter_ein  = t % find_filter(FILTER_ENERGYIN)
 
     ! initialize dimensions of mesh
     nx = 1
@@ -338,17 +342,17 @@ contains
           GLOOP: do g = 1,N_GRPS
 
             ! reset all bins to 1
-            bins = 1     
+            t % matching_bins = 1     
 
             ! set ijk as mesh indices
             ijk = (/i,j,k/)
-            bins(FILTER_MESH) = mesh_indices_to_bin(m,ijk)
+            t % matching_bins(i_filter_mesh) = mesh_indices_to_bin(m,ijk)
 
             ! apply energy in filter
-            bins(FILTER_ENERGYIN) = g
+            t % matching_bins(i_filter_ein) = g
 
             ! calculate filter index from bins
-            filter_index = sum((bins - 1) * t%stride) + 1
+            filter_index = sum((t % matching_bins - 1) * t%stride) + 1
 
             ! calculate score index for H-1 total
             i_nuclide = 1

@@ -4,8 +4,8 @@ module finalize
   use cmfd_output,    only: finalize_cmfd
 # endif
   use global
-  use output,         only: print_runtime
-  use tally,          only: write_tallies, tally_statistics
+  use output,         only: print_runtime, write_tallies
+  use tally,          only: tally_statistics
   use timing,         only: timer_start, timer_stop
 use tally_diffusion
 #ifdef MPI
@@ -39,10 +39,10 @@ contains
        end if
     end if
 
-# ifdef PETSC
+#ifdef PETSC
     ! finalize cmfd
     if (cmfd_run) call finalize_cmfd()
-# endif
+#endif
 
     ! stop timers and show timing statistics
     call timer_stop(time_finalize)
@@ -57,7 +57,7 @@ contains
     ! Close HDF5 interface and release memory
     call hdf5_finalize()
 #endif
-    
+
 #ifdef MPI
     ! If MPI is in use and enabled, terminate it
     call MPI_FINALIZE(mpi_err)
