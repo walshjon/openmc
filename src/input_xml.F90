@@ -1259,6 +1259,8 @@ contains
     if (difcof_mesh_ > 0) then
       difcof_mesh = difcof_mesh_
       n_tallies = n_tallies + 1
+      n_user_tallies = n_user_tallies + 1
+      n_user_analog_tallies = n_user_analog_tallies + 1
     end if
 
     ! Allocate tally array
@@ -1385,6 +1387,9 @@ contains
     ! READ TALLY DATA
 
     READ_TALLIES: do i = 1, n_user_tallies
+      ! check fore diffusion coefficient
+      if(i == n_user_tallies .and. difcof_mesh_ > 0) cycle
+
       ! Get pointer to tally
       t => tallies(i)
 
@@ -1880,10 +1885,6 @@ contains
     ! ==========================================================================
     ! LISTS FOR ANALOG, TRACKLENGTH, CURRENT TALLIES
 
-    ! Check for diffusion coefficient tally
-    if (difcof_mesh > 0) &
-      call create_diffusion_tally(tallies(n_user_tallies+1))
-
     ! Determine number of types of tallies
     if (cmfd_run) then
       n_analog_tallies = n_user_analog_tallies + n_cmfd_analog_tallies
@@ -1899,6 +1900,10 @@ contains
     allocate(analog_tallies(n_analog_tallies))
     allocate(tracklength_tallies(n_tracklength_tallies))
     allocate(current_tallies(n_current_tallies))
+
+    ! Check for diffusion coefficient tally
+    if (difcof_mesh > 0) &
+      call create_diffusion_tally(tallies(n_user_tallies))
 
     ! Set indices for tally pointer lists to zero
     i_analog = 0

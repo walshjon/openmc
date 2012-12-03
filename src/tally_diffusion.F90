@@ -259,10 +259,6 @@ contains
     t % score_bins(2) = SCORE_TOTAL
     t % score_bins(3) = SCORE_SCATTER_1
 
-    ! increment number of analog tallies
-    n_user_analog_tallies = n_user_analog_tallies + 1
-    n_user_tallies = n_user_tallies + 1
-
     ! increment the appropriate index and set pointer
     analog_tallies(n_user_analog_tallies) = n_user_tallies
 
