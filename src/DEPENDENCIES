@@ -19,6 +19,7 @@ cmfd_data.o: error.o
 cmfd_data.o: global.o
 cmfd_data.o: mesh.o
 cmfd_data.o: mesh_header.o
+cmfd_data.o: tally_diffusion.o
 cmfd_data.o: tally_header.o
 
 cmfd_execute.o: constants.o
@@ -43,6 +44,7 @@ cmfd_input.o: global.o
 cmfd_input.o: hdf5_interface.o
 cmfd_input.o: mesh_header.o
 cmfd_input.o: string.o
+cmfd_input.o: tally_diffusion.o
 cmfd_input.o: tally_header.o
 cmfd_input.o: templates/cmfd_t.o
 

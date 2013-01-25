@@ -167,13 +167,14 @@ contains
 
   subroutine create_cmfd_tally()
 
-    use datatypes,      only: dict_add_key, dict_get_key
-    use error,          only: fatal_error, warning
+    use datatypes,        only: dict_add_key, dict_get_key
+    use error,            only: fatal_error, warning
     use global
-    use mesh_header,    only: StructuredMesh
+    use mesh_header,      only: StructuredMesh
     use string
-    use tally,          only: setup_active_cmfdtallies
-    use tally_header,   only: TallyObject, TallyScore, TallyFilter
+    use tally,            only: setup_active_cmfdtallies
+    use tally_diffusion,  only: create_diffusion_tally
+    use tally_header,     only: TallyObject, TallyScore, TallyFilter
     use xml_data_cmfd_t
 
     integer :: i           ! loop counter
@@ -322,6 +323,21 @@ contains
 
       ! set reset property
       if (reset_) t % reset = .true.
+
+      ! set up diffusion coefficient tally
+      if (i == n_user_tallies + 4) then
+
+        ! set up diffusion coefficient mesh
+        difcof_mesh = m % id
+
+        ! set up diffusion coefficient tally
+        call create_diffusion_tally(t)
+
+        ! set this in analog tallies
+        analog_tallies(n_user_analog_tallies + 3) = i
+        cycle
+
+      end if
 
       ! set up mesh filter
       n_filters = 1

@@ -53,15 +53,16 @@ contains
 
   subroutine compute_xs()
 
-    use constants,    only: FILTER_MESH, FILTER_ENERGYIN, FILTER_ENERGYOUT,     &
-                            FILTER_SURFACE, IN_RIGHT, OUT_RIGHT, IN_FRONT,      &
-                            OUT_FRONT, IN_TOP, OUT_TOP, CMFD_NOACCEL, ZERO, ONE
-    use error,        only: fatal_error
-    use global,       only: cmfd, message, n_user_tallies, n_tallies, tallies,  &
-                            meshes
-    use mesh,         only: mesh_indices_to_bin
-    use mesh_header,  only: StructuredMesh
-    use tally_header, only: TallyObject, TallyScore 
+    use constants,        only: FILTER_MESH, FILTER_ENERGYIN, FILTER_ENERGYOUT,     &
+                                FILTER_SURFACE, IN_RIGHT, OUT_RIGHT, IN_FRONT,      &
+                                OUT_FRONT, IN_TOP, OUT_TOP, CMFD_NOACCEL, ZERO, ONE
+    use error,            only: fatal_error
+    use global,           only: cmfd, message, n_user_tallies, n_tallies, tallies,  &
+                                meshes
+    use mesh,             only: mesh_indices_to_bin
+    use mesh_header,      only: StructuredMesh
+    use tally_diffusion,  only: calculate_diffusion
+    use tally_header,     only: TallyObject, TallyScore 
 
     integer :: nx            ! number of mesh cells in x direction
     integer :: ny            ! number of mesh cells in y direction
@@ -81,6 +82,7 @@ contains
     integer :: i_filter_eout ! index for outgoing energy filter
     integer :: i_filter_surf ! index for surface filter
     real(8) :: flux          ! temp variable for flux
+    real(8), allocatable :: difcof(:,:,:,:)
     type(TallyObject),    pointer :: t => null() ! pointer for tally object
     type(StructuredMesh), pointer :: m => null() ! pointer for mesh object
 
@@ -89,6 +91,9 @@ contains
     ny = cmfd % indices(2)
     nz = cmfd % indices(3)
     ng = cmfd % indices(4)
+
+    ! allocate temp variables
+    allocate(difcof(ng,nx,ny,nz))
 
     ! set flux object and source distribution to all zeros
     cmfd % flux = ZERO
@@ -105,7 +110,7 @@ contains
     cmfd % hxyz(3,:,:,:) = m % width(3) ! set z width
 
    ! begin loop around tallies
-   TAL: do ital = n_user_tallies + 1, n_tallies
+   TAL: do ital = n_user_tallies + 1, n_user_tallies + 3
 
      ! associate tallies and mesh
      t => tallies(ital)
@@ -179,6 +184,11 @@ contains
                 cmfd % diffcof(h,i,j,k) = ONE/(3.0_8*(cmfd % totalxs(h,i,j,k) - &
                      cmfd % p1scattxs(h,i,j,k)))
 !               cmfd % diffcof(h,i,j,k) = cmfd % diffusion(h,i,j,k)
+!               if (h == 1) then
+!                 cmfd % diffcof(h,i,j,k) = 15._8
+!               else
+!                 cmfd % diffcof(h,i,j,k) = 5._8
+!               end if
 
               else if (ital == n_user_tallies + 2) then
 
@@ -299,8 +309,17 @@ contains
 
     end do TAL
 
+    ! calculate anisotropic DC
+    call calculate_diffusion(difcof,ng,nx,ny,nz)
+    cmfd % diffcof = difcof
+    write(888,*) cmfd % diffcof
+    stop
+
     ! normalize openmc source distribution
     cmfd % openmc_src = cmfd % openmc_src/sum(cmfd % openmc_src)*cmfd%norm
+
+    ! deallocate all variables
+    deallocate(difcof)
 
     ! nullify all pointers
     if (associated(t)) nullify(t)

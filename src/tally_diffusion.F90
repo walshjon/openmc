@@ -16,7 +16,6 @@ module tally_diffusion
   real(8), allocatable :: p1scatt(:,:,:,:)
   real(8), allocatable :: p1scattH1(:,:,:,:)
   real(8), allocatable :: diffcoef(:,:,:,:)
-  real(8), allocatable :: diffcoef2(:,:,:,:)
   real(8), allocatable :: trans(:,:,:,:)
   real(8), allocatable :: transH1(:,:,:,:)
 
@@ -220,7 +219,7 @@ contains
     t % estimator = ESTIMATOR_ANALOG
 
     ! set tally id
-    t % id = 900
+    t % id = n_user_tallies + 4 
 
     ! set tally label
     t % label = 'DIFFUSION COEFFICIENT'
@@ -259,32 +258,34 @@ contains
     t % score_bins(2) = SCORE_TOTAL
     t % score_bins(3) = SCORE_SCATTER_1
 
-    ! increment the appropriate index and set pointer
-    analog_tallies(n_user_analog_tallies) = n_user_tallies
-
   end subroutine create_diffusion_tally
 
 !===============================================================================
 ! CALCULATE_DIFFUSION
 !===============================================================================
 
-  subroutine calculate_diffusion()
+  subroutine calculate_diffusion(diff_out,ng,nx,ny,nz)
 
     use datatypes,     only: dict_get_key
+    use error,         only: fatal_error
     use global,        only: meshes, tallies, difcof_mesh, n_user_tallies, &
-                             mesh_dict
+                             mesh_dict, message
     use mesh,          only: mesh_indices_to_bin
     use mesh_header,   only: StructuredMesh
     use tally_header,  only: TallyObject
+
+    ! arguments
+    integer :: ng                     ! number of energy groups
+    integer :: nx                     ! number of mesh cells in z direction
+    integer :: ny                     ! number of mesh cells in y direction
+    integer :: nz                     ! number of mesh cells in x direction
+    real(8) :: diff_out(2,nx,ny,nz)   ! output diffusion coefficients
 
     ! local variables
     integer :: g                    ! iteration counter for groups
     integer :: i                    ! iteration counter for x
     integer :: j                    ! iteration counter for y
     integer :: k                    ! iteration counter for z
-    integer :: nx                   ! number of mesh cells in z direction
-    integer :: ny                   ! number of mesh cells in y direction
-    integer :: nz                   ! number of mesh cells in x direction
     integer :: i_mesh               ! mesh index
     integer :: ijk(3)               ! indices for mesh cells
     integer :: filter_index         ! index to pull from tally object
@@ -299,23 +300,13 @@ contains
     type(TallyObject), pointer :: t => null()
 
     ! set pointers
-    t => tallies(n_user_tallies)
+    t => tallies(n_user_tallies + 4)
     i_mesh = t % filters(t % find_filter(FILTER_MESH)) % int_bins(1)
     m => meshes(i_mesh)
 
     ! set up filters
     i_filter_mesh = t % find_filter(FILTER_MESH)
     i_filter_ein  = t % find_filter(FILTER_ENERGYIN)
-
-    ! initialize dimensions of mesh
-    nx = 1
-    ny = 1
-    nz = 1
-
-    ! extract dimensions from mesh
-    nx = m % dimension(1)
-    ny = m % dimension(2)
-    if (size(m % dimension) > 2) nz = m % dimension(3)
 
     ! allocate variables
     allocate(flux(N_GRPS,nx,ny,nz))
@@ -324,7 +315,6 @@ contains
     allocate(p1scatt(N_GRPS,nx,ny,nz))
     allocate(p1scattH1(N_GRPS,nx,ny,nz))
     allocate(diffcoef(N_GRPS,nx,ny,nz))
-    allocate(diffcoef2(2,nx,ny,nz))
     allocate(trans(N_GRPS,nx,ny,nz))
     allocate(transH1(N_GRPS,nx,ny,nz))
 
@@ -338,7 +328,7 @@ contains
           GLOOP: do g = 1,N_GRPS
 
             ! reset all bins to 1
-            t % matching_bins = 1     
+            t % matching_bins = 1
 
             ! set ijk as mesh indices
             ijk = (/i,j,k/)
@@ -382,6 +372,12 @@ contains
 
           end do GLOOP
 
+          ! if flux is zero skip
+          if (abs(minval(flux(:,i,j,k)) - ZERO) < TINY_BIT) then
+            diff_out(:,i,j,k) = ZERO_FLUX 
+            cycle
+          end if
+
           ! compute transport reaction rate
           trans(:,i,j,k) = total(:,i,j,k) - p1scatt(:,i,j,k)
           transH1(:,i,j,k) = totalH1(:,i,j,k) - p1scattH1(:,i,j,k)
@@ -402,18 +398,25 @@ contains
           diffcoef(:,i,j,k) = 1/(3*trans(:,i,j,k))
 
           ! collapse diffusion coefficient
-          diffcoef2(2,i,j,k) = sum(diffcoef(1:24,i,j,k)*flux(1:24,i,j,k)) / &
-                               sum(flux(1:24,i,j,k))
-          diffcoef2(1,i,j,k) = sum(diffcoef(25:70,i,j,k)*flux(25:70,i,j,k)) / &
-                               sum(flux(25:70,i,j,k))
+          if (ng == 2) then
+            diff_out(2,i,j,k) = sum(diffcoef(1:24,i,j,k)*flux(1:24,i,j,k)) / &
+                                sum(flux(1:24,i,j,k))
+            diff_out(1,i,j,k) = sum(diffcoef(25:70,i,j,k)*flux(25:70,i,j,k)) / &
+                                sum(flux(25:70,i,j,k))
+          else if (ng == 1) then
+            diff_out(1,i,j,k) = sum(diffcoef(1:70,i,j,k)*flux(1:70,i,j,k)) / &
+                                sum(flux(1:70,i,j,k))
+          else
+            message = 'Only 1 or 2 group calculation allowed for diff. coeffs'
+            call fatal_error()
+          end if
 
         end do XLOOP
 
       end do YLOOP
 
     end do ZLOOP
-print *,'DiFF:'
-print *,diffcoef2
+
     ! deallocate variables
     deallocate(flux)
     deallocate(total)
@@ -421,7 +424,6 @@ print *,diffcoef2
     deallocate(p1scatt)
     deallocate(p1scattH1)
     deallocate(diffcoef)
-    deallocate(diffcoef2)
     deallocate(trans)
     deallocate(transH1)
 

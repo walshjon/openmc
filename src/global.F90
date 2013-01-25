@@ -316,8 +316,8 @@ module global
 
   ! user-defined tally information
   integer :: n_cmfd_meshes              = 1 ! # of structured meshes
-  integer :: n_cmfd_tallies             = 3 ! # of user-defined tallies
-  integer :: n_cmfd_analog_tallies      = 2 ! # of analog tallies
+  integer :: n_cmfd_tallies             = 4 ! # of user-defined tallies
+  integer :: n_cmfd_analog_tallies      = 3 ! # of analog tallies
   integer :: n_cmfd_tracklength_tallies = 0 ! # of track-length tallies
   integer :: n_cmfd_current_tallies     = 1 ! # of surface current tallies
 

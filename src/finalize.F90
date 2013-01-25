@@ -34,7 +34,6 @@ contains
        if (output_tallies) then
           ! Calculate statistics for tallies and write to tallies.out
           if (master) call tally_statistics()
-          if (master) call calculate_diffusion()
           if (master) call write_tallies()
        end if
     end if
