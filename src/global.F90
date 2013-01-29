@@ -5,8 +5,8 @@ module global
   use bank_header,      only: Bank
   use cmfd_header
   use constants
-  use datatypes,        only: list_delete
-  use datatypes_header, only: DictionaryII, DictionaryCI, ListInt
+  use dict_header,      only: DictCharInt, DictIntInt
+  use list_header,      only: ListInt
   use geometry_header,  only: Cell, Universe, Lattice, Surface
   use material_header,  only: Material
   use mesh_header,      only: StructuredMesh
@@ -14,7 +14,7 @@ module global
   use plot_header,      only: Plot
   use source_header,    only: ExtSource
   use tally_header,     only: TallyObject, TallyMap, TallyResult
-  use timing,           only: Timer
+  use timer_header,     only: Timer
 
 #ifdef MPI
   use mpi
@@ -54,13 +54,13 @@ module global
   ! These dictionaries provide a fast lookup mechanism -- the key is the
   ! user-specified identifier and the value is the index in the corresponding
   ! array
-  type(DictionaryII), pointer :: cell_dict     => null()
-  type(DictionaryII), pointer :: universe_dict => null()
-  type(DictionaryII), pointer :: lattice_dict  => null()
-  type(DictionaryII), pointer :: surface_dict  => null()
-  type(DictionaryII), pointer :: material_dict => null()
-  type(DictionaryII), pointer :: mesh_dict     => null()
-  type(DictionaryII), pointer :: tally_dict    => null()
+  type(DictIntInt) :: cell_dict
+  type(DictIntInt) :: universe_dict
+  type(DictIntInt) :: lattice_dict
+  type(DictIntInt) :: surface_dict
+  type(DictIntInt) :: material_dict
+  type(DictIntInt) :: mesh_dict
+  type(DictIntInt) :: tally_dict
 
   ! ============================================================================
   ! CROSS SECTION RELATED VARIABLES
@@ -79,9 +79,9 @@ module global
   integer :: n_listings       ! Number of listings in cross_sections.xml
 
   ! Dictionaries to look up cross sections and listings
-  type(DictionaryCI), pointer :: nuclide_dict    => null()
-  type(DictionaryCI), pointer :: sab_dict        => null()
-  type(DictionaryCI), pointer :: xs_listing_dict => null()
+  type(DictCharInt) :: nuclide_dict
+  type(DictCharInt) :: sab_dict
+  type(DictCharInt) :: xs_listing_dict
 
   ! Unionized energy grid
   integer :: grid_method ! how to treat the energy grid
@@ -106,10 +106,9 @@ module global
   integer, allocatable :: current_tallies(:)
 
   ! Global tallies
-  !   1) analog estimate of k-eff
-  !   2) collision estimate of k-eff
-  !   3) track-length estimate of k-eff
-  !   4) leakage fraction
+  !   1) collision estimate of k-eff
+  !   2) track-length estimate of k-eff
+  !   3) leakage fraction
 
   type(TallyResult), target :: global_tallies(N_GLOBAL_TALLIES)
 
@@ -151,10 +150,10 @@ module global
   !=============================================================================
   ! ACTIVE TALLY-RELATED VARIABLES
 
-  type(ListInt), pointer :: active_analog_tallies => null()
-  type(ListInt), pointer :: active_tracklength_tallies => null()
-  type(ListInt), pointer :: active_current_tallies => null()
-  type(ListInt), pointer :: active_tallies => null()
+  type(ListInt) :: active_analog_tallies
+  type(ListInt) :: active_tracklength_tallies
+  type(ListInt) :: active_current_tallies
+  type(ListInt) :: active_tallies
 
   ! ============================================================================
   ! EIGENVALUE SIMULATION VARIABLES
@@ -420,10 +419,10 @@ contains
     call deallocate_cmfd(cmfd)
 
     ! Deallocate tally node lists
-    call list_delete(active_analog_tallies)
-    call list_delete(active_tracklength_tallies)
-    call list_delete(active_current_tallies)
-    call list_delete(active_tallies)
+    call active_analog_tallies % clear()
+    call active_tracklength_tallies % clear()
+    call active_current_tallies % clear()
+    call active_tallies % clear()
 
   end subroutine free_memory
 

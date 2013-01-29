@@ -188,14 +188,13 @@ contains
 
   subroutine create_cmfd_tally()
 
-    use datatypes,        only: dict_add_key, dict_get_key
     use error,            only: fatal_error, warning
     use global
     use mesh_header,      only: StructuredMesh
     use string
     use tally,            only: setup_active_cmfdtallies
     use tally_diffusion,  only: create_diffusion_tally
-    use tally_header,     only: TallyObject, TallyScore, TallyFilter
+    use tally_header,     only: TallyObject, TallyFilter
     use xml_data_cmfd_t
 
     integer :: i           ! loop counter
@@ -331,7 +330,7 @@ contains
     m % volume_frac = ONE/real(product(m % dimension),8)
 
     ! Add mesh to dictionary
-    call dict_add_key(mesh_dict, m % id, n_user_meshes + 1)
+    call mesh_dict % add_key(m % id, n_user_meshes + 1)
 
     ! allocate tallies
     if (.not. allocated(tallies)) allocate(tallies(n_tallies))
@@ -343,7 +342,8 @@ contains
       t => tallies(i)
 
       ! set reset property
-      if (reset_) t % reset = .true.
+      call lower_case(reset_)
+      if (reset_ == 'true' .or. reset_ == '1') t % reset = .true. 
 
       ! set up diffusion coefficient tally
       if (i == n_user_tallies + 4) then

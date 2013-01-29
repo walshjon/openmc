@@ -173,7 +173,6 @@ contains
 
   subroutine create_diffusion_tally(t)
 
-    use datatypes,     only: dict_has_key, dict_get_key
     use error,         only: fatal_error
     use global,        only: default_xs, nuclide_dict, message, &
                              difcof_mesh, mesh_dict, meshes, &
@@ -194,18 +193,18 @@ contains
 
     ! check if hydogen is included in problem
     hydrogen = "H-1" // "." // default_xs
-    if (.not. dict_has_key(nuclide_dict, hydrogen)) then
+    if (.not. nuclide_dict % has_key (hydrogen)) then
       message = "Could not find nuclide " // trim(hydrogen) // &
                 " needed for diffusion coefficients."
       call fatal_error()
     end if
 
     ! check if mesh exists
-    if (.not. dict_has_key(mesh_dict, difcof_mesh)) then
+    if (.not. mesh_dict % has_key(difcof_mesh)) then
       message = "Mesh for diffusion coefficient does not exist."
       call fatal_error()
     else
-      i_mesh = dict_get_key(mesh_dict, difcof_mesh)
+      i_mesh = mesh_dict % get_key(difcof_mesh) 
       m => meshes(i_mesh)
     end if
 
@@ -248,7 +247,7 @@ contains
     ! set nuclide data
     allocate(t % nuclide_bins(2)) ! 1 for hydrogen and 2 for total
     t % n_nuclide_bins = 2
-    t % nuclide_bins(1) = dict_get_key(nuclide_dict, hydrogen)
+    t % nuclide_bins(1) = nuclide_dict % get_key(hydrogen)
     t % nuclide_bins(2) = -1
 
     ! set scores
@@ -270,7 +269,6 @@ contains
 
   subroutine calculate_diffusion(diff_out,ng,nx,ny,nz)
 
-    use datatypes,     only: dict_get_key
     use error,         only: fatal_error
     use global,        only: meshes, tallies, difcof_mesh, n_user_tallies, &
                              mesh_dict, message

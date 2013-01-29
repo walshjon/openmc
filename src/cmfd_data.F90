@@ -62,7 +62,7 @@ contains
     use mesh,             only: mesh_indices_to_bin
     use mesh_header,      only: StructuredMesh
     use tally_diffusion,  only: calculate_diffusion
-    use tally_header,     only: TallyObject, TallyScore 
+    use tally_header,     only: TallyObject
 
     integer :: nx            ! number of mesh cells in x direction
     integer :: ny            ! number of mesh cells in y direction
