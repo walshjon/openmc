@@ -35,6 +35,7 @@ contains
     use error,   only: fatal_error
     use global
     use output,  only: write_message
+    use string,  only: lower_case
     use xml_data_cmfd_t
     use, intrinsic :: ISO_FORTRAN_ENV
 
@@ -103,38 +104,58 @@ contains
     cmfd % norm = norm_
 
     ! set feedback logical
-    cmfd_feedback = feedback_
+    call lower_case(feedback_)
+    if (feedback_ == 'true' .or. feedback_ == '1') cmfd_feedback = .true.
 
     ! set balance logical
-    ! cmfd_balance = balance_
+    ! call lower_case(balance_)
+    ! if (balance_ == 'true' .or. balance == '1') cmfd_balance = .true.
 
     ! set downscatter logical
-    ! cmfd_downscatter = downscatter_
+    ! call lower_case(downscatter_)
+    ! if (downscatter_ == 'true' .or. downscatter == '1') &
+    !      cmfd_downscatter = downscatter_
 
     ! set 2 group fix
-    cmfd_run_2grp = run_2grp_
+    call lower_case(run_2grp_)
+    if (run_2grp_ == 'true' .or. run_2grp_ == '1') cmfd_run_2grp = .true.
 
     ! set the solver type
     cmfd_solver_type = solver_
 
     ! set monitoring 
-    cmfd_snes_monitor = snes_monitor_
-    cmfd_ksp_monitor = ksp_monitor_
-    cmfd_power_monitor = power_monitor_
+    call lower_case(snes_monitor_)
+    call lower_case(ksp_monitor_)
+    call lower_case(power_monitor_)
+    if (snes_monitor_ == 'true' .or. snes_monitor_ == '1') &
+         cmfd_snes_monitor = .true.
+    if (ksp_monitor_ == 'true' .or. ksp_monitor_ == '1') &
+         cmfd_ksp_monitor = .true.
+    if (power_monitor_ == 'true' .or. power_monitor_ == '1') &
+         cmfd_power_monitor = .true.
 
     ! output logicals
-    cmfd_write_balance = write_balance_
-    cmfd_write_matrices = write_matrices_
-!   cmfd_write_hdf5 = write_hdf5_
+    call lower_case(write_balance_)
+    call lower_case(write_matrices_)
+    ! call lower_case(write_hdf5_)
+    if (write_balance_ == 'true' .or. write_balance_ == '1') &
+         cmfd_write_balance = .true.
+    if (write_matrices_ == 'true' .or. write_matrices_ == '1') &
+         cmfd_write_matrices = .true.
+    ! if (write_hdf5_ == 'true' .or. write_hdf5_ == '1') &
+    !      cmfd_write_hdf5 = .true.
 
     ! run an adjoint calc
-    cmfd_run_adjoint = run_adjoint_
+    call lower_case(run_adjoint_)
+    if (run_adjoint_ == 'true' .or. run_adjoint_ == '1') &
+         cmfd_run_adjoint = .true.
 
     ! batch to begin cmfd
     cmfd_begin = begin_
 
     ! tally during inactive batches
-    cmfd_tally_on = inactive_
+    call lower_case(inactive_)
+    if (inactive_ == 'false' .or. inactive_ == '0') cmfd_tally_on = .false.
 
     ! inactive batch flush window
     cmfd_inact_flush(1) = inactive_flush_
@@ -385,12 +406,18 @@ contains
         ! allocate scoring bins 
         allocate(t % score_bins(4))
         t % n_score_bins = 4
+        t % n_user_score_bins = 4
 
+        ! allocate scattering order data
+        allocate(t % scatt_order(4))
+        t % scatt_order = 0
+        
         ! set macro_bins
-        t % score_bins(1) = SCORE_FLUX
-        t % score_bins(2) = SCORE_TOTAL
-        t % score_bins(3) = SCORE_SCATTER_1
-        t % score_bins(4) = SCORE_DIFFUSION
+        t % score_bins(1)  = SCORE_FLUX
+        t % score_bins(2)  = SCORE_TOTAL
+        t % score_bins(3)  = SCORE_SCATTER_N
+        t % scatt_order(3) = 1
+        t % score_bins(4)  = SCORE_DIFFUSION
 
         ! Increment the appropriate index and set pointer
         analog_tallies(n_user_analog_tallies + 1) = i
@@ -429,6 +456,11 @@ contains
         ! allocate macro reactions
         allocate(t % score_bins(2))
         t % n_score_bins = 2
+        t % n_user_score_bins = 2
+
+        ! allocate scattering order data
+        allocate(t % scatt_order(2))
+        t % scatt_order = 0
 
         ! set macro_bins
         t % score_bins(1) = SCORE_NU_SCATTER
@@ -470,6 +502,11 @@ contains
         ! allocate macro reactions
         allocate(t % score_bins(1))
         t % n_score_bins = 1
+        t % n_user_score_bins = 1
+
+        ! allocate scattering order data
+        allocate(t % scatt_order(1))
+        t % scatt_order = 0
 
         ! set macro bins
         t % score_bins(1) = SCORE_CURRENT

@@ -180,7 +180,7 @@ contains
                              n_user_analog_tallies, n_user_tallies, &
                              analog_tallies
     use mesh_header,   only: StructuredMesh
-    use tally_header,  only: TallyObject, TallyScore, TallyFilter
+    use tally_header,  only: TallyObject, TallyFilter
 
     ! arguments
     type(TallyObject) :: t
@@ -254,9 +254,13 @@ contains
     ! set scores
     allocate(t % score_bins(3))
     t % n_score_bins = 3
+    t % n_user_score_bins = 3
+    allocate(t % scatt_order(3))
+    t % scatt_order = 0
     t % score_bins(1) = SCORE_FLUX
     t % score_bins(2) = SCORE_TOTAL
-    t % score_bins(3) = SCORE_SCATTER_1
+    t % score_bins(3) = SCORE_SCATTER_N
+    t % scatt_order(3) = 1
 
   end subroutine create_diffusion_tally
 
@@ -344,37 +348,37 @@ contains
             i_nuclide = 1
             i_score = 2
             score_index = (i_nuclide - 1)*t % n_score_bins + i_score 
-            totalH1(g,i,j,k) = t % scores(score_index,filter_index) % sum 
+            totalH1(g,i,j,k) = t % results(score_index,filter_index) % sum 
 
             ! calculate score index for H-1 p1scatt
             i_nuclide = 1
             i_score = 3
             score_index = (i_nuclide - 1)*t % n_score_bins + i_score
-            p1scattH1(g,i,j,k) = t % scores(score_index,filter_index) % sum
+            p1scattH1(g,i,j,k) = t % results(score_index,filter_index) % sum
 
             ! calculate score index for all nuclides flux
             i_nuclide = 2
             i_score = 1
             score_index = (i_nuclide - 1)*t % n_score_bins + i_score
-            flux(g,i,j,k) = t % scores(score_index,filter_index) % sum
+            flux(g,i,j,k) = t % results(score_index,filter_index) % sum
 
             ! calculate score index for all nuclides total 
             i_nuclide = 2
             i_score = 2
             score_index = (i_nuclide - 1)*t % n_score_bins + i_score
-            total(g,i,j,k) = t % scores(score_index,filter_index) % sum
+            total(g,i,j,k) = t % results(score_index,filter_index) % sum
 
             ! calculate score index for all nuclides flux
             i_nuclide = 2
             i_score = 3
             score_index = (i_nuclide - 1)*t % n_score_bins + i_score
-            p1scatt(g,i,j,k) = t % scores(score_index,filter_index) % sum 
+            p1scatt(g,i,j,k) = t % results(score_index,filter_index) % sum 
 
           end do GLOOP
 
           ! if flux is zero skip
           if (abs(minval(flux(:,i,j,k)) - ZERO) < TINY_BIT) then
-            diff_out(:,i,j,k) = ZERO_FLUX 
+            diff_out(:,i,j,k) = ZERO_FLUX
             cycle
           end if
 

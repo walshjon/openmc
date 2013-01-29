@@ -82,7 +82,7 @@ contains
       ! If using the no-tally-reduction method, we need to collect tally
       ! results before writing them to the state point file.
 
-      call write_tally_scores_nr(fh)
+      call write_tally_results_nr(fh)
 
     elseif (master) then
       ! Write number of realizations
@@ -93,7 +93,7 @@ contains
       call MPI_FILE_WRITE(fh, N_GLOBAL_TALLIES, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, global_tallies, N_GLOBAL_TALLIES, &
-           MPI_TALLYSCORE, MPI_STATUS_IGNORE, mpi_err)
+           MPI_TALLYRESULT, MPI_STATUS_IGNORE, mpi_err)
 
       if (tallies_on) then
         ! Indicate that tallies are on
@@ -101,14 +101,14 @@ contains
         call MPI_FILE_WRITE(fh, temp, 1, MPI_INTEGER, &
              MPI_STATUS_IGNORE, mpi_err)
 
-        ! Write all tally scores
-        TALLY_SCORES: do i = 1, n_tallies
+        ! Write all tally results
+        TALLY_RESULTS: do i = 1, n_tallies
           t => tallies(i)
 
-          n = size(t % scores, 1) * size(t % scores, 2)
-          call MPI_FILE_WRITE(fh, t % scores, n, MPI_TALLYSCORE, &
+          n = size(t % results, 1) * size(t % results, 2)
+          call MPI_FILE_WRITE(fh, t % results, n, MPI_TALLYRESULT, &
                MPI_STATUS_IGNORE, mpi_err)
-        end do TALLY_SCORES
+        end do TALLY_RESULTS
       else
         ! Indicate that tallies are off
         temp = 0
@@ -120,7 +120,7 @@ contains
     ! ==========================================================================
     ! SOURCE BANK
 
-    if (run_mode == MODE_CRITICALITY) then
+    if (run_mode == MODE_EIGENVALUE) then
       if (source_separate) then
         ! If the user has specified that the source sites should be written in
         ! a separate file, we make a call to the appropriate subroutine to
@@ -170,6 +170,9 @@ contains
     ! Write current date and time
     write(UNIT_STATE) time_stamp()
 
+    ! Write path to input
+    write(UNIT_STATE) path_input
+
     ! Write out random number seed
     write(UNIT_STATE) seed
 
@@ -179,11 +182,11 @@ contains
     ! Write out current batch number
     write(UNIT_STATE) current_batch
 
-    ! Write out information for criticality run
-    if (run_mode == MODE_CRITICALITY) then
+    ! Write out information for eigenvalue run
+    if (run_mode == MODE_EIGENVALUE) then
       write(UNIT_STATE) n_inactive, gen_per_batch
       write(UNIT_STATE) k_batch(1:current_batch)
-      write(UNIT_STATE) entropy(1:current_batch)
+      write(UNIT_STATE) entropy(1:current_batch*gen_per_batch)
     end if
 
     ! Write number of meshes
@@ -191,6 +194,7 @@ contains
 
     ! Write information for meshes
     MESH_LOOP: do i = 1, n_meshes
+      write(UNIT_STATE) meshes(i) % id
       write(UNIT_STATE) meshes(i) % type
       write(UNIT_STATE) meshes(i) % n_dimension
       write(UNIT_STATE) meshes(i) % dimension
@@ -206,10 +210,13 @@ contains
       ! Get pointer to tally
       t => tallies(i)
 
+      ! Write id
+      write(UNIT_STATE) t % id
+
       ! Number of realizations
       write(UNIT_STATE) t % n_realizations
 
-      ! Write size of each dimension of tally scores array
+      ! Write size of each dimension of tally results array
       write(UNIT_STATE) t % total_score_bins
       write(UNIT_STATE) t % total_filter_bins
 
@@ -244,9 +251,13 @@ contains
         end if
       end do NUCLIDE_LOOP
 
-      ! Write number of score bins
+      ! Write number of score bins, score bins, and scatt order
       write(UNIT_STATE) t % n_score_bins
       write(UNIT_STATE) t % score_bins
+      write(UNIT_STATE) t % scatt_order
+
+      ! Write number of user score bins
+      write(UNIT_STATE) t % n_user_score_bins
     end do TALLY_METADATA
 
     ! Number of realizations for global tallies
@@ -263,25 +274,25 @@ contains
       ! Indicate that tallies are on
       write(UNIT_STATE) 1
 
-      TALLY_SCORES: do i = 1, n_tallies
+      TALLY_RESULTS: do i = 1, n_tallies
         ! Get pointer to tally
         t => tallies(i)
 
         ! Write tally sum and sum_sq for each bin
-        do k = 1, size(t % scores, 2)
-          do j = 1, size(t % scores, 1)
-            write(UNIT_STATE) t % scores(j,k) % sum
-            write(UNIT_STATE) t % scores(j,k) % sum_sq
+        do k = 1, size(t % results, 2)
+          do j = 1, size(t % results, 1)
+            write(UNIT_STATE) t % results(j,k) % sum
+            write(UNIT_STATE) t % results(j,k) % sum_sq
           end do
         end do
-      end do TALLY_SCORES
+      end do TALLY_RESULTS
     else
       ! Indicate that tallies are off
       write(UNIT_STATE) 0
     end if
 
     ! Write out source bank 
-    if (run_mode == MODE_CRITICALITY) then
+    if (run_mode == MODE_EIGENVALUE) then
       if (source_separate) then
         ! If the user has specified that the source sites should be written in
         ! a separate file, we make a call to the appropriate subroutine to
@@ -333,6 +344,10 @@ contains
     call MPI_FILE_WRITE(fh, time_stamp(), 19, MPI_CHARACTER, &
          MPI_STATUS_IGNORE, mpi_err)
 
+    ! Write path to input
+    call MPI_FILE_WRITE(fh, path_input, MAX_FILE_LEN, MPI_CHARACTER, &
+         MPI_STATUS_IGNORE, mpi_err)
+
     ! Write out random number seed
     call MPI_FILE_WRITE(fh, seed, 1, MPI_INTEGER8, &
          MPI_STATUS_IGNORE, mpi_err)
@@ -349,15 +364,15 @@ contains
     call MPI_FILE_WRITE(fh, current_batch, 1, MPI_INTEGER, &
          MPI_STATUS_IGNORE, mpi_err)
 
-    ! Write out information for criticality run
-    if (run_mode == MODE_CRITICALITY) then
+    ! Write out information for eigenvalue run
+    if (run_mode == MODE_EIGENVALUE) then
       call MPI_FILE_WRITE(fh, n_inactive, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, gen_per_batch, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, k_batch, current_batch, MPI_REAL8, &
            MPI_STATUS_IGNORE, mpi_err)
-      call MPI_FILE_WRITE(fh, entropy, current_batch, MPI_REAL8, &
+      call MPI_FILE_WRITE(fh, entropy, current_batch*gen_per_batch, MPI_REAL8, &
            MPI_STATUS_IGNORE, mpi_err)
     end if
 
@@ -367,6 +382,8 @@ contains
 
     ! Write information for meshes
     MESH_LOOP: do i = 1, n_meshes
+      call MPI_FILE_WRITE(fh, meshes(i) % id, 1, MPI_INTEGER, &
+           MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, meshes(i) % type, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, meshes(i) % n_dimension, 1, MPI_INTEGER, &
@@ -390,6 +407,10 @@ contains
     TALLY_METADATA: do i = 1, n_tallies
       ! Get pointer to tally
       t => tallies(i)
+
+      ! Write id
+      call MPI_FILE_WRITE(fh, t % id, 1, MPI_INTEGER, &
+           MPI_STATUS_IGNORE, mpi_err)
 
       ! Write number of realizations
       call MPI_FILE_WRITE(fh, t % n_realizations, 1, MPI_INTEGER, &
@@ -442,11 +463,16 @@ contains
         end if
       end do NUCLIDE_LOOP
 
-      ! Write number of score bins
+      ! Write number of score bins, score bins, and scatt order
       call MPI_FILE_WRITE(fh, t % n_score_bins, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, t % score_bins, t % n_score_bins, &
            MPI_INTEGER, MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_WRITE(fh, t % scatt_order, t % n_score_bins, &
+           MPI_INTEGER, MPI_STATUS_IGNORE, mpi_err)
+      ! Write number of user score bins
+      call MPI_FILE_WRITE(fh, t % n_user_score_bins, 1, MPI_INTEGER, &
+           MPI_STATUS_IGNORE, mpi_err)
     end do TALLY_METADATA
 
   end subroutine write_state_point_header
@@ -454,10 +480,10 @@ contains
 
 #ifdef MPI
 !===============================================================================
-! WRITE_TALLY_SCORES_NR
+! WRITE_TALLY_RESULTS_NR
 !===============================================================================
 
-  subroutine write_tally_scores_nr(fh)
+  subroutine write_tally_results_nr(fh)
 
     integer, intent(in) :: fh ! file handle
 
@@ -466,7 +492,7 @@ contains
     integer :: m      ! number of score bins
     integer :: temp   ! temporary variable
     integer :: n_bins ! total number of bins
-    real(8), allocatable :: tally_temp(:,:,:) ! contiguous array of scores
+    real(8), allocatable :: tally_temp(:,:,:) ! contiguous array of results
     real(8) :: global_temp(2,N_GLOBAL_TALLIES)
     real(8) :: dummy  ! temporary receive buffer for non-root reduces
     type(TallyObject), pointer :: t => null()
@@ -518,20 +544,20 @@ contains
              MPI_STATUS_IGNORE, mpi_err)
       end if
 
-      ! Write all tally scores
-      TALLY_SCORES: do i = 1, n_tallies
+      ! Write all tally results
+      TALLY_RESULTS: do i = 1, n_tallies
         t => tallies(i)
 
-        ! Determine size of tally scores array
-        m = size(t % scores, 1)
-        n = size(t % scores, 2)
+        ! Determine size of tally results array
+        m = size(t % results, 1)
+        n = size(t % results, 2)
         n_bins = m*n*2
 
         ! Allocate array for storing sums and sums of squares, but
         ! contiguously in memory for each
         allocate(tally_temp(2,m,n))
-        tally_temp(1,:,:) = t % scores(:,:) % sum
-        tally_temp(2,:,:) = t % scores(:,:) % sum_sq
+        tally_temp(1,:,:) = t % results(:,:) % sum
+        tally_temp(2,:,:) = t % results(:,:) % sum_sq
 
         if (master) then
           ! The MPI_IN_PLACE specifier allows the master to copy values into
@@ -544,10 +570,10 @@ contains
                MPI_STATUS_IGNORE, mpi_err)
 
           ! At the end of the simulation, store the results back in the
-          ! regular TallyScores array
+          ! regular TallyResults array
           if (current_batch == n_batches) then
-            t % scores(:,:) % sum = tally_temp(1,:,:)
-            t % scores(:,:) % sum_sq = tally_temp(2,:,:)
+            t % results(:,:) % sum = tally_temp(1,:,:)
+            t % results(:,:) % sum_sq = tally_temp(2,:,:)
           end if
         else
           ! Receive buffer not significant at other processors
@@ -557,7 +583,7 @@ contains
 
         ! Deallocate temporary copy of tally results
         deallocate(tally_temp)
-      end do TALLY_SCORES
+      end do TALLY_RESULTS
     else
       if (master) then
         ! Indicate that tallies are off
@@ -567,7 +593,7 @@ contains
       end if
     end if
 
-  end subroutine write_tally_scores_nr
+  end subroutine write_tally_results_nr
 #endif
 
 !===============================================================================
@@ -583,6 +609,7 @@ contains
     integer, allocatable :: int_array(:)
     real(8), allocatable :: real_array(:)
     character(19)        :: current_time  ! current date and time
+    character(MAX_FILE_LEN) :: path_temp
 
 #ifdef MPI
     integer :: fh                      ! file handle
@@ -628,6 +655,10 @@ contains
     call MPI_FILE_READ_ALL(fh, current_time, 19, MPI_CHARACTER, &
          MPI_STATUS_IGNORE, mpi_err)
 
+    ! Read path to input
+    call MPI_FILE_READ_ALL(fh, path_temp, MAX_FILE_LEN, MPI_CHARACTER, &
+         MPI_STATUS_IGNORE, mpi_err)
+
     ! Read and overwrite random number seed
     call MPI_FILE_READ_ALL(fh, seed, 1, MPI_INTEGER8, &
          MPI_STATUS_IGNORE, mpi_err)
@@ -644,16 +675,16 @@ contains
     call MPI_FILE_READ_ALL(fh, restart_batch, 1, MPI_INTEGER, &
          MPI_STATUS_IGNORE, mpi_err)
 
-    ! Read information specific to criticality run
-    if (mode == MODE_CRITICALITY) then
+    ! Read information specific to eigenvalue run
+    if (mode == MODE_EIGENVALUE) then
       call MPI_FILE_READ_ALL(fh, n_inactive, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_READ_ALL(fh, gen_per_batch, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_READ_ALL(fh, k_batch, restart_batch, MPI_REAL8, &
            MPI_STATUS_IGNORE, mpi_err)
-      call MPI_FILE_READ_ALL(fh, entropy, restart_batch, MPI_REAL8, &
-           MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_READ_ALL(fh, entropy, restart_batch*gen_per_batch, &
+           MPI_REAL8, MPI_STATUS_IGNORE, mpi_err)
     end if
 
     if (master) then
@@ -665,13 +696,13 @@ contains
       end if
 
       MESH_LOOP: do i = 1, n_meshes
-        ! Read type of mesh and dimension
-        call MPI_FILE_READ(fh, temp, 2, MPI_INTEGER, MPI_STATUS_IGNORE, &
+        ! Read id, mesh type, and dimension
+        call MPI_FILE_READ(fh, temp, 3, MPI_INTEGER, MPI_STATUS_IGNORE, &
              mpi_err)
 
         ! Skip mesh data
         call MPI_FILE_GET_POSITION(fh, offset, mpi_err)
-        offset = offset + temp(2)*(4 + 3*8)
+        offset = offset + temp(3)*(4 + 3*8)
         call MPI_FILE_SEEK(fh, offset, MPI_SEEK_SET, mpi_err)
       end do MESH_LOOP
 
@@ -683,16 +714,20 @@ contains
       end if
 
       TALLY_METADATA: do i = 1, n_tallies
+        ! Read tally id
+        call MPI_FILE_READ(fh, tallies(i) % id, 1, MPI_INTEGER, &
+             MPI_STATUS_IGNORE, mpi_err)
+
         ! Read number of realizations for global tallies
         call MPI_FILE_READ(fh, tallies(i) % n_realizations, 1, &
              MPI_INTEGER, MPI_STATUS_IGNORE, mpi_err)
 
-        ! Read dimensions of tally filters and scores and make sure they
+        ! Read dimensions of tally filters and results and make sure they
         ! match
         call MPI_FILE_READ(fh, temp, 2, MPI_INTEGER, &
              MPI_STATUS_IGNORE, mpi_err)
-        if (temp(1) /= size(tallies(i) % scores, 1) .or. &
-             temp(2) /= size(tallies(i) % scores, 2)) then
+        if (temp(1) /= size(tallies(i) % results, 1) .or. &
+             temp(2) /= size(tallies(i) % results, 2)) then
           message = "Tally dimensions do not match in state point."
           call fatal_error()
         end if
@@ -736,15 +771,23 @@ contains
              MPI_STATUS_IGNORE, mpi_err)
         deallocate(int_array)
 
-        ! Read number of scores
+        ! Read number of results
         call MPI_FILE_READ(fh, temp, 1, MPI_INTEGER, &
              MPI_STATUS_IGNORE, mpi_err)
 
-        ! Read nuclide bins
+        ! Read score bins and scatt_order
         allocate(int_array(temp(1)))
         call MPI_FILE_READ(fh, int_array, temp(1), MPI_INTEGER, &
              MPI_STATUS_IGNORE, mpi_err)
+        call MPI_FILE_READ(fh, int_array, temp(1), MPI_INTEGER, &
+             MPI_STATUS_IGNORE, mpi_err)
         deallocate(int_array)
+        call MPI_FILE_READ(fh, temp, 1, MPI_INTEGER, &
+             MPI_STATUS_IGNORE, mpi_err)
+        
+        ! Read number of user score bins
+        call MPI_FILE_READ(fh, temp, 1, MPI_INTEGER, &
+             MPI_STATUS_IGNORE, mpi_err)
       end do TALLY_METADATA
 
       ! Read number of realizations for global tallies
@@ -760,7 +803,7 @@ contains
 
       ! Read global tally data
       call MPI_FILE_READ(fh, global_tallies, N_GLOBAL_TALLIES, &
-           MPI_TALLYSCORE, MPI_STATUS_IGNORE, mpi_err)
+           MPI_TALLYRESULT, MPI_STATUS_IGNORE, mpi_err)
 
       ! Check if tally results are present
       call MPI_FILE_READ(fh, temp, 1, MPI_INTEGER, MPI_STATUS_IGNORE, mpi_err)
@@ -770,18 +813,18 @@ contains
 
       ! Read sum and sum squared
       if (temp(1) == 1) then
-        TALLY_SCORES: do i = 1, n_tallies
-          n = size(tallies(i) % scores, 1) * size(tallies(i) % scores, 2)
-          call MPI_FILE_READ(fh, tallies(i) % scores, n, MPI_TALLYSCORE, &
+        TALLY_RESULTS: do i = 1, n_tallies
+          n = size(tallies(i) % results, 1) * size(tallies(i) % results, 2)
+          call MPI_FILE_READ(fh, tallies(i) % results, n, MPI_TALLYRESULT, &
                MPI_STATUS_IGNORE, mpi_err)
-        end do TALLY_SCORES
+        end do TALLY_RESULTS
       end if
     end if
 
     ! ==========================================================================
     ! SOURCE BANK
 
-    if (run_mode == MODE_CRITICALITY) then
+    if (run_mode == MODE_EIGENVALUE) then
       ! Get current offset for master
       if (master) call MPI_FILE_GET_POSITION(fh, offset, mpi_err)
 
@@ -832,6 +875,9 @@ contains
     ! Read date and time
     read(UNIT_STATE) current_time
 
+    ! Read path
+    read(UNIT_STATE) path_temp
+
     ! Read and overwrite random number seed
     read(UNIT_STATE) seed
 
@@ -841,11 +887,11 @@ contains
     ! Read batch number to restart at
     read(UNIT_STATE) restart_batch
 
-    ! Read information specific to criticality run
-    if (mode == MODE_CRITICALITY) then
+    ! Read information specific to eigenvalue run
+    if (mode == MODE_EIGENVALUE) then
       read(UNIT_STATE) n_inactive, gen_per_batch
       read(UNIT_STATE) k_batch(1:restart_batch)
-      read(UNIT_STATE) entropy(1:restart_batch)
+      read(UNIT_STATE) entropy(1:restart_batch*gen_per_batch)
     end if
 
     if (master) then
@@ -857,12 +903,12 @@ contains
       end if
 
       MESH_LOOP: do i = 1, n_meshes
-        ! Read type of mesh and dimension
-        read(UNIT_STATE) temp(1:2)
+        ! Read id, mesh type, and dimension
+        read(UNIT_STATE) temp(1:3)
 
         ! Allocate temporary arrays
-        allocate(int_array(temp(2)))
-        allocate(real_array(temp(2)))
+        allocate(int_array(temp(3)))
+        allocate(real_array(temp(3)))
 
         ! Read dimension, lower_left, upper_right, width
         read(UNIT_STATE) int_array
@@ -883,14 +929,17 @@ contains
       end if
 
       TALLY_METADATA: do i = 1, n_tallies
+        ! Read id
+        read(UNIT_STATE) temp(1)
+
         ! Read number of realizations
         read(UNIT_STATE) tallies(i) % n_realizations
 
-        ! Read dimensions of tally filters and scores and make sure they
+        ! Read dimensions of tally filters and results and make sure they
         ! match
         read(UNIT_STATE) temp(1:2)
-        if (temp(1) /= size(tallies(i) % scores, 1) .or. &
-             temp(2) /= size(tallies(i) % scores, 2)) then
+        if (temp(1) /= size(tallies(i) % results, 1) .or. &
+             temp(2) /= size(tallies(i) % results, 2)) then
           message = "Tally dimensions do not match in state point."
           call fatal_error()
         end if
@@ -927,13 +976,17 @@ contains
         read(UNIT_STATE) int_array
         deallocate(int_array)
 
-        ! Read number of scores
+        ! Read number of results
         read(UNIT_STATE) temp(1)
 
-        ! Read nuclide bins
+        ! Read results bins and scatt_order
         allocate(int_array(temp(1)))
         read(UNIT_STATE) int_array
+        read(UNIT_STATE) int_array
         deallocate(int_array)
+        
+        ! Read number of user bins
+        read(UNIT_STATE) temp(1)
       end do TALLY_METADATA
 
       ! Read number of realizations for global tallies
@@ -955,19 +1008,19 @@ contains
       ! Read sum and sum squared
       read(UNIT_STATE) temp(1)
       if (temp(1) == 1) then
-        TALLY_SCORES: do i = 1, n_tallies
-          do k = 1, size(tallies(i) % scores, 2)
-            do j = 1, size(tallies(i) % scores, 1)
-              read(UNIT_STATE) tallies(i) % scores(j,k) % sum
-              read(UNIT_STATE) tallies(i) % scores(j,k) % sum_sq
+        TALLY_RESULTS: do i = 1, n_tallies
+          do k = 1, size(tallies(i) % results, 2)
+            do j = 1, size(tallies(i) % results, 1)
+              read(UNIT_STATE) tallies(i) % results(j,k) % sum
+              read(UNIT_STATE) tallies(i) % results(j,k) % sum_sq
             end do
           end do
-        end do TALLY_SCORES
+        end do TALLY_RESULTS
       end if
     end if
-
-    ! Read source bank for criticality run
-    if (mode == MODE_CRITICALITY .and. run_mode /= MODE_TALLIES) then
+    
+    ! Read source bank for eigenvalue run
+    if (mode == MODE_EIGENVALUE .and. run_mode /= MODE_TALLIES) then
       read(UNIT_STATE) source_bank
     end if
 
@@ -993,13 +1046,6 @@ contains
     if (current_batch == 1) then
       message = "Replaying history from state point..."
       call write_message(1)
-    end if
-
-    ! For criticality calculations, turn on tallies if we've reached active
-    ! batches
-    if (current_batch == n_inactive) then
-      tallies_on = .true.
-      call setup_active_usertallies()
     end if
 
     ! Add to number of realizations

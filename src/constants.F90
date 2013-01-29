@@ -7,12 +7,12 @@ module constants
 
   ! OpenMC major, minor, and release numbers
   integer, parameter :: VERSION_MAJOR   = 0
-  integer, parameter :: VERSION_MINOR   = 4
-  integer, parameter :: VERSION_RELEASE = 4
+  integer, parameter :: VERSION_MINOR   = 5
+  integer, parameter :: VERSION_RELEASE = 0
 
   ! Revision numbers for binary files
   integer, parameter :: REVISION_SOURCE     = 1
-  integer, parameter :: REVISION_STATEPOINT = 5
+  integer, parameter :: REVISION_STATEPOINT = 7
 
   ! ============================================================================
   ! ADJUSTABLE PARAMETERS 
@@ -32,6 +32,7 @@ module constants
   ! User for precision in geometry
   real(8), parameter :: FP_PRECISION = 1e-14_8
   real(8), parameter :: FP_REL_PRECISION = 1e-5_8
+  real(8), parameter :: FP_COINCIDENT = 1e-12_8
 
   ! Maximum number of collisions/crossings
   integer, parameter :: MAX_EVENTS = 10000
@@ -251,26 +252,27 @@ module constants
        EVENT_FISSION =  3 
 
   ! Tally score type
-  integer, parameter :: N_SCORE_TYPES = 18
+  integer, parameter :: N_SCORE_TYPES = 15
   integer, parameter :: &
-       SCORE_FLUX       = -1,  & ! flux
-       SCORE_TOTAL      = -2,  & ! total reaction rate
-       SCORE_SCATTER    = -3,  & ! scattering rate
-       SCORE_NU_SCATTER = -4,  & ! scattering production rate
-       SCORE_SCATTER_1  = -5,  & ! first scattering moment
-       SCORE_SCATTER_2  = -6,  & ! second scattering moment
-       SCORE_SCATTER_3  = -7,  & ! third scattering moment
-       SCORE_TRANSPORT  = -8,  & ! transport reaction rate
-       SCORE_DIFFUSION  = -9,  & ! diffusion coefficient
-       SCORE_N_1N       = -10, & ! (n,1n) rate
-       SCORE_N_2N       = -11, & ! (n,2n) rate
-       SCORE_N_3N       = -12, & ! (n,3n) rate
-       SCORE_N_4N       = -13, & ! (n,4n) rate
-       SCORE_ABSORPTION = -14, & ! absorption rate
-       SCORE_FISSION    = -15, & ! fission rate
-       SCORE_NU_FISSION = -16, & ! neutron production rate
-       SCORE_CURRENT    = -17, & ! partial current
-       SCORE_EVENTS     = -18    ! number of events
+       SCORE_FLUX          = -1,  & ! flux
+       SCORE_TOTAL         = -2,  & ! total reaction rate
+       SCORE_SCATTER       = -3,  & ! scattering rate
+       SCORE_NU_SCATTER    = -4,  & ! scattering production rate
+       SCORE_SCATTER_N     = -5,  & ! arbitrary scattering moment
+       SCORE_SCATTER_PN    = -6,  & ! system for scoring 0th through nth moment
+       SCORE_TRANSPORT     = -7,  & ! transport reaction rate
+       SCORE_DIFFUSION     = -8,  & ! diffusion coefficient
+       SCORE_N_1N          = -9,  & ! (n,1n) rate
+       SCORE_ABSORPTION    = -10, & ! absorption rate
+       SCORE_FISSION       = -11, & ! fission rate
+       SCORE_NU_FISSION    = -12, & ! neutron production rate
+       SCORE_KAPPA_FISSION = -13, & ! fission energy production rate
+       SCORE_CURRENT       = -14, & ! partial current
+       SCORE_EVENTS        = -15    ! number of events
+       
+  ! Maximum scattering order supported
+  integer, parameter :: SCATT_ORDER_MAX = 10
+  character(len=*), parameter :: SCATT_ORDER_MAX_PNSTR = "scatter-p10"
 
   ! Tally map bin finding
   integer, parameter :: NO_BIN_FOUND = -1
@@ -297,12 +299,11 @@ module constants
        OUT_TOP   = 6
 
   ! Global tallY parameters
-  integer, parameter :: N_GLOBAL_TALLIES = 4
+  integer, parameter :: N_GLOBAL_TALLIES = 3
   integer, parameter :: &
-       K_ANALOG      = 1, &
-       K_COLLISION   = 2, &
-       K_TRACKLENGTH = 3, &
-       LEAKAGE       = 4
+       K_COLLISION   = 1, &
+       K_TRACKLENGTH = 2, &
+       LEAKAGE       = 3
 
   ! ============================================================================
   ! EXTERNAL SOURCE PARAMETERS
@@ -345,7 +346,7 @@ module constants
   ! Running modes
   integer, parameter ::        &
        MODE_FIXEDSOURCE = 1, & ! Fixed source mode
-       MODE_CRITICALITY = 2, & ! Criticality mode
+       MODE_EIGENVALUE  = 2, & ! K eigenvalue mode
        MODE_PLOTTING    = 3, & ! Plotting mode
        MODE_TALLIES     = 4    ! Tally results mode
 

@@ -1,17 +1,20 @@
 module tally
 
+  use ace_header,       only: Reaction
   use constants
   use datatypes_header, only: ListInt
-  use error,         only: fatal_error
+  use error,            only: fatal_error
   use global
-  use math,          only: t_percentile
-  use mesh,          only: get_mesh_bin, bin_to_mesh_indices, get_mesh_indices, &
-                           mesh_indices_to_bin, mesh_intersects
-  use mesh_header,   only: StructuredMesh
-  use output,        only: header
-  use search,        only: binary_search
-  use string,        only: to_str
-  use tally_header,  only: TallyScore, TallyMapItem, TallyMapElement
+  use math,             only: t_percentile, calc_pn
+  use mesh,             only: get_mesh_bin, bin_to_mesh_indices, &
+                              get_mesh_indices, mesh_indices_to_bin, &
+                              mesh_intersects
+  use mesh_header,      only: StructuredMesh
+  use output,           only: header
+  use particle_header,  only: LocalCoord
+  use search,           only: binary_search
+  use string,           only: to_str
+  use tally_header,     only: TallyResult, TallyMapItem, TallyMapElement
 
 #ifdef MPI
   use mpi
@@ -34,6 +37,9 @@ contains
 
     integer :: j                    ! loop index for scoring bins
     integer :: k                    ! loop index for nuclide bins
+    integer :: n                    ! loop index for scattering order
+    integer :: l                    ! scoring bin loop index, allowing for changing 
+                                    ! position during the loop
     integer :: filter_index         ! single index for single bin
     integer :: score_bin            ! scoring bin, e.g. SCORE_FLUX
     integer :: i_nuclide            ! index in nuclides array
@@ -73,10 +79,10 @@ contains
       end if
 
       ! =======================================================================
-      ! CALCULATE SCORES AND ACCUMULATE TALLY
+      ! CALCULATE RESULTS AND ACCUMULATE TALLY
 
       ! If we have made it here, we have a scoring combination of bins for this
-      ! tally -- now we need to determine where in the scores array we should
+      ! tally -- now we need to determine where in the results array we should
       ! be accumulating the tally values
 
       ! Determine scoring index for this filter combination
@@ -119,7 +125,9 @@ contains
         end if
 
         ! Determine score for each bin
-        SCORE_LOOP: do j = 1, t % n_score_bins
+        j = 0
+        SCORE_LOOP: do l = 1, t % n_user_score_bins
+          j = j + 1
           ! determine what type of score bin
           score_bin = t % score_bins(j)
 
@@ -139,7 +147,13 @@ contains
             ! use the weight of the particle entering the collision as the
             ! score
 
-            score = last_wgt
+            if (survival_biasing) then
+              ! We need to account for the fact that some weight was already
+              ! absorbed
+              score = last_wgt + p % absorb_wgt
+            else
+              score = last_wgt
+            end if
 
           case (SCORE_SCATTER)
             ! Skip any event where the particle didn't scatter
@@ -160,35 +174,40 @@ contains
             ! reaction with neutrons in the exit channel
 
             score = wgt
-
-          case (SCORE_SCATTER_1)
+            
+          case (SCORE_SCATTER_N)
             ! Skip any event where the particle didn't scatter
             if (p % event /= EVENT_SCATTER) cycle SCORE_LOOP
 
-            ! The first scattering moment can be determined by using the
-            ! rate of scattering reactions multiplied by the cosine of the
-            ! change in neutron's angle due to the collision
+            ! Find the scattering order for a singly requested moment, and
+            ! store its moment contribution.
 
-            score = last_wgt * mu
+            if (t % scatt_order(j) == 1) then
+              score = last_wgt * mu ! avoid function call overhead
+            else
+              score = last_wgt * calc_pn(t % scatt_order(j), mu)
+            endif
 
-          case (SCORE_SCATTER_2)
+          case (SCORE_SCATTER_PN)
             ! Skip any event where the particle didn't scatter
-            if (p % event /= EVENT_SCATTER) cycle SCORE_LOOP
-
-            ! The second scattering moment can be determined in a similar
-            ! manner to the first scattering moment
-
-            score = last_wgt * 0.5*(3.0*mu*mu - ONE)
-
-          case (SCORE_SCATTER_3)
-            ! Skip any event where the particle didn't scatter
-            if (p % event /= EVENT_SCATTER) cycle SCORE_LOOP
-
-            ! The first scattering moment can be determined by using the
-            ! rate of scattering reactions multiplied by the cosine of the
-            ! change in neutron's angle due to the collision
-
-            score = last_wgt * 0.5*(5.0*mu*mu*mu - 3.0*mu)
+            if (p % event /= EVENT_SCATTER) then
+              j = j + t % scatt_order(j)
+              cycle SCORE_LOOP
+            end if
+            score_index = score_index - 1
+            ! Find the scattering order for a collection of requested moments
+            ! and store the moment contribution of each
+            do n = 0, t % scatt_order(j)
+              ! determine scoring bin index
+              score_index = score_index + 1
+              ! get the score and tally it
+              score = last_wgt * calc_pn(n, mu)
+              
+              t % results(score_index, filter_index) % value = &
+                t % results(score_index, filter_index) % value + score
+            end do
+            j = j + t % scatt_order(j)
+            cycle SCORE_LOOP
 
           case (SCORE_TRANSPORT)
             ! Skip any event where the particle didn't scatter
@@ -229,92 +248,116 @@ contains
             ! All events that reach this point are (n,1n) reactions
             score = last_wgt
 
-          case (SCORE_N_2N)
-            ! Skip any event where the particle didn't scatter
-            if (p % event /= EVENT_SCATTER) cycle SCORE_LOOP
-
-            ! Skip any scattering events where the weight didn't double
-            if (nint(wgt/last_wgt) /= 2) cycle SCORE_LOOP
-
-            ! All events that reach this point are (n,2n) reactions
-            score = last_wgt
-
-          case (SCORE_N_3N)
-            ! Skip any event where the particle didn't scatter
-            if (p % event /= EVENT_SCATTER) cycle SCORE_LOOP
-
-            ! Skip any scattering events where the weight didn't double
-            if (nint(wgt/last_wgt) /= 3) cycle SCORE_LOOP
-
-            ! All events that reach this point are (n,3n) reactions
-            score = last_wgt
-
-          case (SCORE_N_4N)
-            ! Skip any event where the particle didn't scatter
-            if (p % event /= EVENT_SCATTER) cycle SCORE_LOOP
-
-            ! Skip any scattering events where the weight didn't double
-            if (nint(wgt/last_wgt) /= 4) cycle SCORE_LOOP
-
-            ! All events that reach this point are (n,3n) reactions
-            score = last_wgt
-
           case (SCORE_ABSORPTION)
-            ! Skip any event where the particle wasn't absorbed
-            if (p % event == EVENT_SCATTER) cycle SCORE_LOOP
+            if (survival_biasing) then
+              ! No absorption events actually occur if survival biasing is on --
+              ! just use weight absorbed in survival biasing
 
-            ! All fission and absorption events will contribute here, so we
-            ! can just use the particle's weight entering the collision
-
-            score = last_wgt
-
-          case (SCORE_FISSION)
-            ! Skip any non-fission events
-            if (p % event /= EVENT_FISSION) cycle SCORE_LOOP
-
-            ! All fission events will contribute, so again we can use
-            ! particle's weight entering the collision as the estimate for
-            ! the fission reaction rate
-
-            score = last_wgt
-
-          case (SCORE_NU_FISSION)
-            ! Skip any non-fission events
-            if (p % event /= EVENT_FISSION) cycle SCORE_LOOP
-
-            if (t % find_filter(FILTER_ENERGYOUT) > 0) then
-              ! Normally, we only need to make contributions to one scoring
-              ! bin. However, in the case of fission, since multiple
-              ! fission neutrons were emitted with different energies,
-              ! multiple outgoing energy bins may have been scored to. The
-              ! following logic treats this special case and scores to
-              ! multiple bins
-
-              call score_fission_eout(t, score_index)
-              cycle SCORE_LOOP
+              score = p % absorb_wgt
 
             else
-              ! If there is no outgoing energy filter, than we only need to
-              ! score to one bin. For the score to be 'analog', we need to
-              ! score the number of particles that were banked in the
-              ! fission bank. Since this was weighted by 1/keff, we
-              ! multiply by keff to get the proper score.
+              ! Skip any event where the particle wasn't absorbed
+              if (p % event == EVENT_SCATTER) cycle SCORE_LOOP
 
-              score = keff * p % wgt_bank
+              ! All fission and absorption events will contribute here, so we
+              ! can just use the particle's weight entering the collision
 
+              score = last_wgt
             end if
 
+          case (SCORE_FISSION)
+            if (survival_biasing) then
+              ! No fission events occur if survival biasing is on -- need to
+              ! calculate fraction of absorptions that would have resulted in
+              ! fission
+
+              score = p % absorb_wgt * micro_xs(p % event_nuclide) % fission / &
+                   micro_xs(p % event_nuclide) % absorption
+
+            else
+              ! Skip any non-fission events
+              if (p % event /= EVENT_FISSION) cycle SCORE_LOOP
+
+              ! All fission events will contribute, so again we can use
+              ! particle's weight entering the collision as the estimate for the
+              ! fission reaction rate
+
+              score = last_wgt
+            end if
+
+          case (SCORE_NU_FISSION)
+            if (survival_biasing) then
+              ! No fission events occur if survival biasing is on -- need to
+              ! calculate fraction of absorptions that would have resulted in
+              ! nu-fission
+
+              score = p % absorb_wgt * micro_xs(p % event_nuclide) % &
+                   nu_fission / micro_xs(p % event_nuclide) % absorption
+
+            else
+              ! Skip any non-fission events
+              if (p % event /= EVENT_FISSION) cycle SCORE_LOOP
+
+              if (t % find_filter(FILTER_ENERGYOUT) > 0) then
+                ! Normally, we only need to make contributions to one scoring
+                ! bin. However, in the case of fission, since multiple fission
+                ! neutrons were emitted with different energies, multiple
+                ! outgoing energy bins may have been scored to. The following
+                ! logic treats this special case and results to multiple bins
+
+                call score_fission_eout(t, score_index)
+                cycle SCORE_LOOP
+
+              else
+                ! If there is no outgoing energy filter, than we only need to
+                ! score to one bin. For the score to be 'analog', we need to
+                ! score the number of particles that were banked in the fission
+                ! bank. Since this was weighted by 1/keff, we multiply by keff
+                ! to get the proper score.
+
+                score = keff * p % wgt_bank
+
+              end if
+            end if
+          
+          case (SCORE_KAPPA_FISSION)
+            if (survival_biasing) then
+              ! No fission events occur if survival biasing is on -- need to
+              ! calculate fraction of absorptions that would have resulted in
+              ! fission and multiply by Q
+
+              score = p % absorb_wgt * &
+                      micro_xs(p % event_nuclide) % kappa_fission / &
+                      micro_xs(p % event_nuclide) % absorption
+              
+            else
+              ! Skip any non-fission events
+              if (p % event /= EVENT_FISSION) cycle SCORE_LOOP
+
+              ! All fission events will contribute, so again we can use
+              ! particle's weight entering the collision as the estimate for
+              ! the fission energy production rate
+              
+              n = nuclides(p % event_nuclide) % index_fission(1)
+              score = last_wgt * &
+                nuclides(p % event_nuclide) % reactions(n) % Q_value
+            end if
           case (SCORE_EVENTS)
             ! Simply count number of scoring events
             score = ONE
 
           case default
-            message = "Invalid score type on tally " // to_str(t % id) // "."
-            call fatal_error()
+            ! Any other score is assumed to be a MT number. Thus, we just need
+            ! to check if it matches the MT number of the event
+            if (p % event_MT /= score_bin) cycle SCORE_LOOP
+
+            score = last_wgt
+
           end select
 
           ! Add score to tally
-          call add_to_score(t % scores(score_index, filter_index), score)
+          t % results(score_index, filter_index) % value = &
+               t % results(score_index, filter_index) % value + score
 
         end do SCORE_LOOP
 
@@ -383,7 +426,8 @@ contains
       i_filter = sum((t % matching_bins - 1) * t % stride) + 1
 
       ! Add score to tally
-      call add_to_score(t % scores(i_score, i_filter), score)
+      t % results(i_score, i_filter) % value = &
+           t % results(i_score, i_filter) % value + score
     end do
 
     ! reset outgoing energy bin and score index
@@ -404,10 +448,15 @@ contains
 
     integer :: j                    ! loop index for scoring bins
     integer :: k                    ! loop index for nuclide bins
+    integer :: l                    ! loop index for nuclides in material
+    integer :: m                    ! loop index for reactions
     integer :: filter_index         ! single index for single bin
-    integer :: i_nuclide            ! index in nuclides array
+    integer :: i_nuclide            ! index in nuclides array (from bins)
+    integer :: i_nuc                ! index in nuclides array (from material)
+    integer :: i_energy             ! index in nuclide energy grid
     integer :: score_bin            ! scoring type, e.g. SCORE_FLUX
     integer :: score_index          ! scoring bin index
+    real(8) :: f                    ! interpolation factor
     real(8) :: flux                 ! tracklength estimate of flux
     real(8) :: score                ! actual score (e.g., flux*xs)
     real(8) :: atom_density         ! atom density of single nuclide in atom/b-cm
@@ -415,6 +464,7 @@ contains
     type(TallyObject), pointer :: t => null()
     type(Material), pointer :: mat => null()
     type(ListInt), pointer :: curr_ptr => null()
+    type(Reaction), pointer :: rxn => null()
 
     ! Determine track-length estimate of flux
     flux = p % wgt * distance
@@ -447,10 +497,10 @@ contains
       end if
 
       ! =======================================================================
-      ! CALCULATE SCORES AND ACCUMULATE TALLY
+      ! CALCULATE RESULTS AND ACCUMULATE TALLY
 
       ! If we have made it here, we have a scoring combination of bins for this
-      ! tally -- now we need to determine where in the scores array we should
+      ! tally -- now we need to determine where in the results array we should
       ! be accumulating the tally values
 
       ! Determine scoring index for this filter combination
@@ -491,51 +541,171 @@ contains
             score_bin = t % score_bins(j)
 
             if (i_nuclide > 0) then
-              ! Determine macroscopic nuclide cross section 
+              ! ================================================================
+              ! DETERMINE NUCLIDE CROSS SECTION
+
               select case(score_bin)
               case (SCORE_TOTAL)
+                ! Total cross section is pre-calculated
                 score = micro_xs(i_nuclide) % total * &
                      atom_density * flux
+
               case (SCORE_SCATTER)
+                ! Scattering cross section is pre-calculated
                 score = (micro_xs(i_nuclide) % total - &
                      micro_xs(i_nuclide) % absorption) * &
                      atom_density * flux
+
               case (SCORE_ABSORPTION)
+                ! Absorption cross section is pre-calculated
                 score = micro_xs(i_nuclide) % absorption * &
                      atom_density * flux
+
               case (SCORE_FISSION)
+                ! Fission cross section is pre-calculated
                 score = micro_xs(i_nuclide) % fission * &
                      atom_density * flux
+
               case (SCORE_NU_FISSION)
+                ! Nu-fission cross section is pre-calculated
                 score = micro_xs(i_nuclide) % nu_fission * &
                      atom_density * flux
+
+              case (SCORE_KAPPA_FISSION)
+                score = micro_xs(i_nuclide) % kappa_fission * &
+                     atom_density * flux
+
               case (SCORE_EVENTS)
+                ! For number of events, just score unity
                 score = ONE
+
               case default
-                message = "Invalid score type on tally " // to_str(t % id) // "."
-                call fatal_error()
+                ! Any other cross section has to be calculated on-the-fly. For
+                ! cross sections that are used often (e.g. n2n, ngamma, etc. for
+                ! depletion), it might make sense to optimize this section or
+                ! pre-calculate cross sections
+
+                if (score_bin > 1) then
+                  ! Set default score
+                  score = ZERO
+
+                  ! TODO: The following search for the matching reaction could
+                  ! be replaced by adding a dictionary on each Nuclide instance
+                  ! of the form {MT: i_reaction, ...}
+
+                  REACTION_LOOP: do m = 1, nuclides(i_nuclide) % n_reaction
+                    ! Get pointer to reaction
+                    rxn => nuclides(i_nuclide) % reactions(m)
+
+                    ! Check if this is the desired MT
+                    if (score_bin == rxn % MT) then
+                      ! Retrieve index on nuclide energy grid and interpolation
+                      ! factor
+                      i_energy = micro_xs(i_nuclide) % index_grid
+                      f = micro_xs(i_nuclide) % interp_factor
+
+                      if (i_energy >= rxn % threshold) then
+                        score = ((ONE - f) * rxn % sigma(i_energy - &
+                             rxn%threshold + 1) + f * rxn % sigma(i_energy - &
+                             rxn%threshold + 2)) * atom_density * flux
+                      end if
+
+                      exit REACTION_LOOP
+                    end if
+                  end do REACTION_LOOP
+
+                else
+                  message = "Invalid score type on tally " // to_str(t % id) // "."
+                  call fatal_error()
+                end if
               end select
 
             else
-              ! Determine macroscopic material cross section 
+              ! ================================================================
+              ! DETERMINE MATERIAL CROSS SECTION
+
               select case(score_bin)
               case (SCORE_FLUX)
+                ! For flux, we need no cross section
                 score = flux
+
               case (SCORE_TOTAL)
+                ! Total cross section is pre-calculated
                 score = material_xs % total * flux
+
               case (SCORE_SCATTER)
+                ! Scattering cross section is pre-calculated
                 score = (material_xs % total - material_xs % absorption) * flux
+
               case (SCORE_ABSORPTION)
+                ! Absorption cross section is pre-calculated
                 score = material_xs % absorption * flux
+
               case (SCORE_FISSION)
+                ! Fission cross section is pre-calculated
                 score = material_xs % fission * flux
+
               case (SCORE_NU_FISSION)
+                ! Nu-fission cross section is pre-calculated
                 score = material_xs % nu_fission * flux
+
+              case (SCORE_KAPPA_FISSION)
+                score = material_xs % kappa_fission * flux
+
               case (SCORE_EVENTS)
+                ! For number of events, just score unity
                 score = ONE
+
               case default
-                message = "Invalid score type on tally " // to_str(t % id) // "."
-                call fatal_error()
+                ! Any other cross section has to be calculated on-the-fly. This
+                ! is somewhat costly since it requires a loop over each nuclide
+                ! in a material and each reaction in the nuclide
+
+                if (score_bin > 1) then
+                  ! Set default score
+                  score = ZERO
+
+                  ! Get pointer to current material
+                  mat => materials(p % material)
+
+                  do l = 1, mat % n_nuclides
+                    ! Get atom density
+                    atom_density = mat % atom_density(l)
+                    
+                    ! Get index in nuclides array
+                    i_nuc = mat % nuclide(l)
+
+                    ! TODO: The following search for the matching reaction could
+                    ! be replaced by adding a dictionary on each Nuclide
+                    ! instance of the form {MT: i_reaction, ...}
+
+                    do m = 1, nuclides(i_nuc) % n_reaction
+                      ! Get pointer to reaction
+                      rxn => nuclides(i_nuc) % reactions(m)
+
+                      ! Check if this is the desired MT
+                      if (score_bin == rxn % MT) then
+                        ! Retrieve index on nuclide energy grid and interpolation
+                        ! factor
+                        i_energy = micro_xs(i_nuc) % index_grid
+                        f = micro_xs(i_nuc) % interp_factor
+
+                        if (i_energy >= rxn % threshold) then
+                          score = score + ((ONE - f) * rxn % sigma(i_energy - &
+                               rxn%threshold + 1) + f * rxn % sigma(i_energy - &
+                               rxn%threshold + 2)) * atom_density * flux
+                        end if
+
+                        exit
+                      end if
+                    end do
+
+                  end do
+
+                else
+                  message = "Invalid score type on tally " // to_str(t % id) // "."
+                  call fatal_error()
+                end if
               end select
             end if
 
@@ -543,7 +713,8 @@ contains
             score_index = (k - 1)*t % n_score_bins + j
 
             ! Add score to tally
-            call add_to_score(t % scores(score_index, filter_index), score)
+            t % results(score_index, filter_index) % value = &
+                 t % results(score_index, filter_index) % value + score
 
           end do SCORE_LOOP
 
@@ -582,13 +753,17 @@ contains
 
     integer :: i             ! loop index for nuclides in material
     integer :: j             ! loop index for scoring bin types
+    integer :: m             ! loop index for reactions in nuclide
     integer :: i_nuclide     ! index in nuclides array
     integer :: score_bin     ! type of score, e.g. SCORE_FLUX
     integer :: score_index   ! scoring bin index
+    integer :: i_energy      ! index in nuclide energy grid
+    real(8) :: f             ! interpolation factor
     real(8) :: score         ! actual scoring tally value
     real(8) :: atom_density  ! atom density of single nuclide in atom/b-cm
     type(TallyObject), pointer :: t => null()
     type(Material),    pointer :: mat => null()
+    type(Reaction),    pointer :: rxn => null()
 
     ! Get pointer to tally
     t => tallies(i_tally)
@@ -616,20 +791,64 @@ contains
         select case(score_bin)
         case (SCORE_TOTAL)
           score = micro_xs(i_nuclide) % total * atom_density * flux
+
         case (SCORE_SCATTER)
           score = (micro_xs(i_nuclide) % total - &
                micro_xs(i_nuclide) % absorption) * atom_density * flux
+
         case (SCORE_ABSORPTION)
           score = micro_xs(i_nuclide) % absorption * atom_density * flux
+
         case (SCORE_FISSION)
           score = micro_xs(i_nuclide) % fission * atom_density * flux
+
         case (SCORE_NU_FISSION)
           score = micro_xs(i_nuclide) % nu_fission * atom_density * flux
+
+        case (SCORE_KAPPA_FISSION)
+          score = micro_xs(i_nuclide) % kappa_fission * atom_density * flux
+
         case (SCORE_EVENTS)
           score = ONE
+
         case default
-          message = "Invalid score type on tally " // to_str(t % id) // "."
-          call fatal_error()
+          ! Any other cross section has to be calculated on-the-fly. For cross
+          ! sections that are used often (e.g. n2n, ngamma, etc. for depletion),
+          ! it might make sense to optimize this section or pre-calculate cross
+          ! sections
+          
+          if (score_bin > 1) then
+            ! Set default score
+            score = ZERO
+
+            ! TODO: The following search for the matching reaction could be
+            ! replaced by adding a dictionary on each Nuclide instance of the
+            ! form {MT: i_reaction, ...}
+
+            REACTION_LOOP: do m = 1, nuclides(i_nuclide) % n_reaction
+              ! Get pointer to reaction
+              rxn => nuclides(i_nuclide) % reactions(m)
+
+              ! Check if this is the desired MT
+              if (score_bin == rxn % MT) then
+                ! Retrieve index on nuclide energy grid and interpolation factor
+                i_energy = micro_xs(i_nuclide) % index_grid
+                f = micro_xs(i_nuclide) % interp_factor
+
+                if (i_energy >= rxn % threshold) then
+                  score = ((ONE - f) * rxn % sigma(i_energy - &
+                       rxn%threshold + 1) + f * rxn % sigma(i_energy - &
+                       rxn%threshold + 2)) * atom_density * flux
+                end if
+
+                exit REACTION_LOOP
+              end if
+            end do REACTION_LOOP
+
+          else
+            message = "Invalid score type on tally " // to_str(t % id) // "."
+            call fatal_error()
+          end if
         end select
 
         ! Determine scoring bin index based on what the index of the nuclide
@@ -637,14 +856,15 @@ contains
         score_index = (i_nuclide - 1)*t % n_score_bins + j
 
         ! Add score to tally
-        call add_to_score(t % scores(score_index, filter_index), score)
+        t % results(score_index, filter_index) % value = &
+             t % results(score_index, filter_index) % value + score
 
       end do SCORE_LOOP
 
     end do NUCLIDE_LOOP
 
     ! ==========================================================================
-    ! SCORE ALL INDIVIDUAL NUCLIDE REACTION RATES
+    ! SCORE TOTAL MATERIAL REACTION RATES
 
     ! Loop over score types for each bin
     MATERIAL_SCORE_LOOP: do j = 1, t % n_score_bins
@@ -655,21 +875,78 @@ contains
       select case(score_bin)
       case (SCORE_FLUX)
         score = flux
+
       case (SCORE_TOTAL)
         score = material_xs % total * flux
+
       case (SCORE_SCATTER)
         score = (material_xs % total - material_xs % absorption) * flux
+
       case (SCORE_ABSORPTION)
         score = material_xs % absorption * flux
+
       case (SCORE_FISSION)
         score = material_xs % fission * flux
+
       case (SCORE_NU_FISSION)
         score = material_xs % nu_fission * flux
+
+      case (SCORE_KAPPA_FISSION)
+        score = material_xs % kappa_fission * flux
+
       case (SCORE_EVENTS)
         score = ONE
+
       case default
-        message = "Invalid score type on tally " // to_str(t % id) // "."
-        call fatal_error()
+        ! Any other cross section has to be calculated on-the-fly. This is
+        ! somewhat costly since it requires a loop over each nuclide in a
+        ! material and each reaction in the nuclide
+        
+        if (score_bin > 1) then
+          ! Set default score
+          score = ZERO
+
+          ! Get pointer to current material
+          mat => materials(p % material)
+
+          do i = 1, mat % n_nuclides
+            ! Get atom density
+            atom_density = mat % atom_density(i)
+
+            ! Get index in nuclides array
+            i_nuclide = mat % nuclide(i)
+
+            ! TODO: The following search for the matching reaction could
+            ! be replaced by adding a dictionary on each Nuclide
+            ! instance of the form {MT: i_reaction, ...}
+
+            do m = 1, nuclides(i_nuclide) % n_reaction
+              ! Get pointer to reaction
+              rxn => nuclides(i_nuclide) % reactions(m)
+
+              ! Check if this is the desired MT
+              if (score_bin == rxn % MT) then
+                ! Retrieve index on nuclide energy grid and interpolation
+                ! factor
+                i_energy = micro_xs(i_nuclide) % index_grid
+                f = micro_xs(i_nuclide) % interp_factor
+
+                if (i_energy >= rxn % threshold) then
+                  score = score + ((ONE - f) * rxn % sigma(i_energy - &
+                       rxn%threshold + 1) + f * rxn % sigma(i_energy - &
+                       rxn%threshold + 2)) * atom_density * flux
+                end if
+
+                exit
+              end if
+            end do
+
+          end do
+
+        else
+          message = "Invalid score type on tally " // to_str(t % id) // "."
+          call fatal_error()
+        end if
       end select
 
       ! Determine scoring bin index based on what the index of the nuclide
@@ -677,7 +954,8 @@ contains
       score_index = n_nuclides_total*t % n_score_bins + j
 
       ! Add score to tally
-      call add_to_score(t % scores(score_index, filter_index), score)
+      t % results(score_index, filter_index) % value = &
+           t % results(score_index, filter_index) % value + score
 
     end do MATERIAL_SCORE_LOOP
 
@@ -722,6 +1000,7 @@ contains
     type(TallyObject),    pointer :: t => null()
     type(StructuredMesh), pointer :: m => null()
     type(Material),       pointer :: mat => null()
+    type(LocalCoord),     pointer :: coord => null()
 
     t => tallies(i_tally)
     t % matching_bins = 1
@@ -769,9 +1048,15 @@ contains
 
       case (FILTER_CELL)
         ! determine next cell bin
-        ! TODO: Account for cells in multiple levels when performing this filter
-        t % matching_bins(i) = get_next_bin(FILTER_CELL, &
-             p % coord % cell, i_tally)
+        coord => p % coord0
+        do while(associated(coord))
+          position(FILTER_CELL) = 0
+          t % matching_bins(i) = get_next_bin(FILTER_CELL, &
+               coord % cell, i_tally)
+          if (t % matching_bins(i) /= NO_BIN_FOUND) exit
+          coord => coord % next
+        end do
+        nullify(coord)
 
       case (FILTER_CELLBORN)
         ! determine next cellborn bin
@@ -929,6 +1214,8 @@ contains
                 case (SCORE_NU_FISSION)
                   score = micro_xs(i_nuclide) % nu_fission * &
                        atom_density * flux
+                case (SCORE_KAPPA_FISSION)
+                  score = micro_xs(i_nuclide) % kappa_fission * atom_density * flux
                 case (SCORE_EVENTS)
                   score = ONE
                 case default
@@ -952,6 +1239,8 @@ contains
                   score = material_xs % fission * flux
                 case (SCORE_NU_FISSION)
                   score = material_xs % nu_fission * flux
+                case (SCORE_KAPPA_FISSION)
+                  score = material_xs % kappa_fission * flux
                 case (SCORE_EVENTS)
                   score = ONE
                 case default
@@ -965,7 +1254,8 @@ contains
               score_index = (b - 1)*t % n_score_bins + j
 
               ! Add score to tally
-              call add_to_score(t % scores(score_index, filter_index), score)
+              t % results(score_index, filter_index) % value = &
+                   t % results(score_index, filter_index) % value + score
 
             end do SCORE_LOOP
 
@@ -995,6 +1285,7 @@ contains
     real(8) :: E ! particle energy
     type(TallyObject),    pointer :: t => null()
     type(StructuredMesh), pointer :: m => null()
+    type(LocalCoord),     pointer :: coord => null()
 
     found_bin = .true.
     t => tallies(i_tally)
@@ -1022,9 +1313,15 @@ contains
 
       case (FILTER_CELL)
         ! determine next cell bin
-        ! TODO: Account for cells in multiple levels when performing this filter
-        t % matching_bins(i) = get_next_bin(FILTER_CELL, &
-             p % coord % cell, i_tally)
+        coord => p % coord0
+        do while(associated(coord))
+          position(FILTER_CELL) = 0
+          t % matching_bins(i) = get_next_bin(FILTER_CELL, &
+               coord % cell, i_tally)
+          if (t % matching_bins(i) /= NO_BIN_FOUND) exit
+          coord => coord % next
+        end do
+        nullify(coord)
 
       case (FILTER_CELLBORN)
         ! determine next cellborn bin
@@ -1186,7 +1483,8 @@ contains
               t % matching_bins(i_filter_mesh) = &
                    mesh_indices_to_bin(m, ijk0 + 1, .true.)
               filter_index = sum((t % matching_bins - 1) * t % stride) + 1
-              call add_to_score(t % scores(1, filter_index), p % wgt)
+              t % results(1, filter_index) % value = &
+                   t % results(1, filter_index) % value + p % wgt
             end if
           end do
         else
@@ -1197,7 +1495,8 @@ contains
               t % matching_bins(i_filter_mesh) = &
                    mesh_indices_to_bin(m, ijk0 + 1, .true.)
               filter_index = sum((t % matching_bins - 1) * t % stride) + 1
-              call add_to_score(t % scores(1, filter_index), p % wgt)
+              t % results(1, filter_index) % value = &
+                   t % results(1, filter_index) % value + p % wgt
             end if
           end do
         end if
@@ -1213,7 +1512,8 @@ contains
               t % matching_bins(i_filter_mesh) = &
                    mesh_indices_to_bin(m, ijk0 + 1, .true.)
               filter_index = sum((t % matching_bins - 1) * t % stride) + 1
-              call add_to_score(t % scores(1, filter_index), p % wgt)
+              t % results(1, filter_index) % value = &
+                   t % results(1, filter_index) % value + p % wgt
             end if
           end do
         else
@@ -1224,7 +1524,8 @@ contains
               t % matching_bins(i_filter_mesh) = &
                    mesh_indices_to_bin(m, ijk0 + 1, .true.)
               filter_index = sum((t % matching_bins - 1) * t % stride) + 1
-              call add_to_score(t % scores(1, filter_index), p % wgt)
+              t % results(1, filter_index) % value = &
+                   t % results(1, filter_index) % value + p % wgt
             end if
           end do
         end if
@@ -1240,7 +1541,8 @@ contains
               t % matching_bins(i_filter_mesh) = &
                    mesh_indices_to_bin(m, ijk0 + 1, .true.)
               filter_index = sum((t % matching_bins - 1) * t % stride) + 1
-              call add_to_score(t % scores(1, filter_index), p % wgt)
+              t % results(1, filter_index) % value = &
+                   t % results(1, filter_index) % value + p % wgt
             end if
           end do
         else
@@ -1251,7 +1553,8 @@ contains
               t % matching_bins(i_filter_mesh) = &
                    mesh_indices_to_bin(m, ijk0 + 1, .true.)
               filter_index = sum((t % matching_bins - 1) * t % stride) + 1
-              call add_to_score(t % scores(1, filter_index), p % wgt)
+              t % results(1, filter_index) % value = &
+                   t % results(1, filter_index) % value + p % wgt
             end if
           end do
         end if
@@ -1375,7 +1678,8 @@ contains
           end if
 
           ! Add to surface current tally
-          call add_to_score(t % scores(1, filter_index), p % wgt)
+          t % results(1, filter_index) % value = &
+               t % results(1, filter_index) % value + p % wgt
         end if
 
         ! Calculate new coordinates
@@ -1456,35 +1760,36 @@ contains
     type(ListInt), pointer :: curr_ptr => null()
 
 #ifdef MPI
-    if (reduce_tallies) call reduce_tally_values()
+    ! Combine tally results onto master process
+    if (reduce_tallies) call reduce_tally_results()
 #endif
 
     ! Increase number of realizations (only used for global tallies)
-    if (active_batches) then
-      if (reduce_tallies) then
-        n_realizations = n_realizations + 1
-      else
-        n_realizations = n_realizations + n_procs
-      end if
+    if (reduce_tallies) then
+      n_realizations = n_realizations + 1
+    else
+      n_realizations = n_realizations + n_procs
     end if
 
     ! Accumulate on master only unless run is not reduced then do it on all
     if (master .or. (.not. reduce_tallies)) then
-      ! Accumulate scores for each tally
+      ! Accumulate results for each tally
       curr_ptr => active_tallies
       do while(associated(curr_ptr))
         call accumulate_tally(tallies(curr_ptr % data))
         curr_ptr => curr_ptr % next
       end do
 
-      if (run_mode == MODE_CRITICALITY) then
-        ! Before accumulating scores for global_tallies, we need to get the
-        ! current batch estimate of k_analog for displaying to output
-        if (active_batches) k_batch(current_batch) = global_tallies(K_ANALOG) % value
+      if (run_mode == MODE_EIGENVALUE) then
+        ! Get the current batch estimate of k_analog for displaying to output
+        ! --- this has to be performed after reduce_tally_values and before
+        ! accumulate_result
+
+        k_batch(current_batch) = global_tallies(K_TRACKLENGTH) % value
       end if
 
-      ! Accumulate scores for global tallies
-      if (active_batches) call accumulate_score(global_tallies)
+      ! Accumulate results for global tallies
+      call accumulate_result(global_tallies)
     end if
 
     if (associated(curr_ptr)) nullify(curr_ptr)
@@ -1492,16 +1797,16 @@ contains
   end subroutine synchronize_tallies
 
 !===============================================================================
-! REDUCE_TALLY_VALUES collects all the results from tallies onto one processor
+! REDUCE_TALLY_RESULTS collects all the results from tallies onto one processor
 !===============================================================================
 
 #ifdef MPI
-  subroutine reduce_tally_values()
+  subroutine reduce_tally_results()
 
     integer :: n      ! number of filter bins
     integer :: m      ! number of score bins
     integer :: n_bins ! total number of bins
-    real(8), allocatable :: tally_temp(:,:) ! contiguous array of scores
+    real(8), allocatable :: tally_temp(:,:) ! contiguous array of results
     real(8) :: global_temp(N_GLOBAL_TALLIES)
     real(8) :: dummy  ! temporary receive buffer for non-root reduces
     type(TallyObject), pointer :: t => null()
@@ -1517,7 +1822,7 @@ contains
 
       allocate(tally_temp(m,n))
 
-      tally_temp = t % scores(:,:) % value
+      tally_temp = t % results(:,:) % value
 
       if (master) then
         ! The MPI_IN_PLACE specifier allows the master to copy values into
@@ -1526,14 +1831,14 @@ contains
              MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
 
         ! Transfer values to value on master
-        t % scores(:,:) % value = tally_temp
+        t % results(:,:) % value = tally_temp
       else
         ! Receive buffer not significant at other processors
         call MPI_REDUCE(tally_temp, dummy, n_bins, MPI_REAL8, &
              MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
 
         ! Reset value on other processors
-        t % scores(:,:) % value = 0
+        t % results(:,:) % value = 0
       end if
 
       deallocate(tally_temp)
@@ -1541,23 +1846,21 @@ contains
     end do
 
     ! Copy global tallies into array to be reduced
-    if (active_batches) then
-      global_temp = global_tallies(:) % value
+    global_temp = global_tallies(:) % value
 
-      if (master) then
-        call MPI_REDUCE(MPI_IN_PLACE, global_temp, N_GLOBAL_TALLIES, &
-             MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
+    if (master) then
+      call MPI_REDUCE(MPI_IN_PLACE, global_temp, N_GLOBAL_TALLIES, &
+           MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
 
-        ! Transfer values back to global_tallies on master
-        global_tallies(:) % value = global_temp
-      else
-        ! Receive buffer not significant at other processors
-        call MPI_REDUCE(global_temp, dummy, N_GLOBAL_TALLIES, &
-             MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
+      ! Transfer values back to global_tallies on master
+      global_tallies(:) % value = global_temp
+    else
+      ! Receive buffer not significant at other processors
+      call MPI_REDUCE(global_temp, dummy, N_GLOBAL_TALLIES, &
+           MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
 
-        ! Reset value on other processors
-        global_tallies(:) % value = ZERO
-      end if
+      ! Reset value on other processors
+      global_tallies(:) % value = ZERO
     end if
 
     ! We also need to determine the total starting weight of particles from the
@@ -1573,7 +1876,7 @@ contains
 
     if (associated(curr_ptr)) nullify(curr_ptr)
 
-  end subroutine reduce_tally_values
+  end subroutine reduce_tally_results
 #endif
 
 !===============================================================================
@@ -1591,14 +1894,14 @@ contains
       t % n_realizations = t % n_realizations + n_procs
     end if
 
-    ! Accumulate each TallyScore
-    call accumulate_score(t % scores)
+    ! Accumulate each TallyResult
+    call accumulate_result(t % results)
 
   end subroutine accumulate_tally
 
 !===============================================================================
 ! TALLY_STATISTICS computes the mean and standard deviation of the mean of each
-! tally and stores them in the val and val_sq attributes of the TallyScores
+! tally and stores them in the val and val_sq attributes of the TallyResults
 ! respectively
 !===============================================================================
 
@@ -1611,87 +1914,72 @@ contains
     do i = 1, n_tallies
       t => tallies(i)
 
-      call statistics_score(t % scores, t % n_realizations)
+      call statistics_result(t % results, t % n_realizations)
     end do
 
     ! Calculate statistics for global tallies
-    call statistics_score(global_tallies, n_realizations)
+    call statistics_result(global_tallies, n_realizations)
 
   end subroutine tally_statistics
 
 !===============================================================================
-! ADD_TO_SCORE accumulates a scoring contribution to a specific tally bin and
-! specific response function. Note that we don't need to add the square of the
-! contribution since that is done at the batch level, not the history level
-!===============================================================================
-
-  subroutine add_to_score(score, val)
-
-    type(TallyScore), intent(inout) :: score
-    real(8),          intent(in)    :: val
-
-    score % value    = score % value    + val
-
-  end subroutine add_to_score
-
-!===============================================================================
-! ACCUMULATE_SCORE accumulates scores from many histories (or many generations)
+! ACCUMULATE_RESULT accumulates results from many histories (or many generations)
 ! into a single realization of a random variable.
 !===============================================================================
 
-  elemental subroutine accumulate_score(score)
+  elemental subroutine accumulate_result(this)
 
-    type(TallyScore), intent(inout) :: score
+    type(TallyResult), intent(inout) :: this
 
     real(8) :: val
 
-    ! Add the sum and square of the sum of contributions from a tally score to
+    ! Add the sum and square of the sum of contributions from a tally result to
     ! the variables sum and sum_sq. This will later allow us to calculate a
     ! variance on the tallies.
 
-    val = score % value/total_weight
-    score % sum    = score % sum    + val
-    score % sum_sq = score % sum_sq + val*val
+    val = this % value/total_weight
+    this % sum    = this % sum    + val
+    this % sum_sq = this % sum_sq + val*val
 
     ! Reset the single batch estimate
-    score % value = ZERO
+    this % value = ZERO
 
-  end subroutine accumulate_score
+  end subroutine accumulate_result
 
 !===============================================================================
-! STATISTICS_SCORE determines the sample mean and the standard deviation of the
-! mean for a TallyScore.
+! STATISTICS_RESULT determines the sample mean and the standard deviation of the
+! mean for a TallyResult.
 !===============================================================================
 
-  elemental subroutine statistics_score(score, n)
+  elemental subroutine statistics_result(this, n)
 
-    type(TallyScore), intent(inout) :: score
-    integer,          intent(in)    :: n
+    type(TallyResult), intent(inout) :: this
+    integer,           intent(in)    :: n
 
     ! Calculate sample mean and standard deviation of the mean -- note that we
     ! have used Bessel's correction so that the estimator of the variance of the
     ! sample mean is unbiased.
 
-    score % sum    = score % sum/n
-    score % sum_sq = sqrt((score % sum_sq/n - score % sum * &
-         score % sum) / (n - 1))
+    this % sum    = this % sum/n
+    this % sum_sq = sqrt((this % sum_sq/n - this % sum * &
+         this % sum) / (n - 1))
 
-  end subroutine statistics_score
+  end subroutine statistics_result
 
 !===============================================================================
-! RESET_SCORE zeroes out the value and accumulated sum and sum-squared for a
-! single TallyScore.
+! RESET_RESULT zeroes out the value and accumulated sum and sum-squared for a
+! single TallyResult.
 !===============================================================================
 
-  elemental subroutine reset_score(score)
+  elemental subroutine reset_result(this)
 
-    type(TallyScore), intent(inout) :: score
+    type(TallyResult), intent(inout) :: this
 
-    score % value    = ZERO
-    score % sum      = ZERO
-    score % sum_sq   = ZERO
+    this % value    = ZERO
+    this % sum      = ZERO
+    this % sum_sq   = ZERO
 
-  end subroutine reset_score
+  end subroutine reset_result
 
 !===============================================================================
 ! SETUP_ACTIVE_USERTALLIES

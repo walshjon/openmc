@@ -70,11 +70,10 @@ contains
     end if
 
     ! Initialize XML scalar variables
-    cross_sections_ = ""
+    cross_sections_ = ''
     verbosity_ = 0
-    energy_grid_ = "union"
+    energy_grid_ = 'union'
     seed_ = 0_8
-    no_reduce_ = ""
     source_ % file = ''
     source_ % space % type = ''
     source_ % angle % type = ''
@@ -103,36 +102,46 @@ contains
     end if
 
     ! Make sure that either criticality or fixed source was specified
-    if (criticality_ % batches == 0 .and. fixed_source_ % batches == 0) then
-      message = "Number of batches on <criticality> or <fixed_source> " &
-           // "tag was zero."
+    if (eigenvalue_ % batches == 0 .and. fixed_source_ % batches == 0 &
+         .and. criticality_ % batches == 0) then
+      message = "Number of batches on <eigenvalue> or <fixed_source> &
+           &tag was zero."
       call fatal_error()
     end if
 
-    ! Criticality information
+    ! Check for old <criticality> tag
     if (criticality_ % batches > 0) then
+      eigenvalue_ = criticality_
+      message = "The <criticality> element has been deprecated and &
+           &replaced by <eigenvalue>."
+      call warning()
+    end if
+
+    ! Eigenvalue information
+    if (eigenvalue_ % batches > 0) then
       ! Set run mode
-      if (run_mode == NONE) run_mode = MODE_CRITICALITY
+      if (run_mode == NONE) run_mode = MODE_EIGENVALUE
 
       ! Check number of particles
-      if (len_trim(criticality_ % particles) == 0) then
+      if (len_trim(eigenvalue_ % particles) == 0) then
         message = "Need to specify number of particles per cycles."
         call fatal_error()
       end if
 
       ! If the number of particles was specified as a command-line argument, we
       ! don't set it here
-      if (n_particles == 0) n_particles = str_to_int(criticality_ % particles)
+      if (n_particles == 0) n_particles = str_to_int(eigenvalue_ % particles)
 
       ! Copy batch and generation information
-      n_batches     = criticality_ % batches
-      n_inactive    = criticality_ % inactive
+      n_batches     = eigenvalue_ % batches
+      n_inactive    = eigenvalue_ % inactive
       n_active      = n_batches - n_inactive
-      gen_per_batch = criticality_ % generations_per_batch
+      gen_per_batch = eigenvalue_ % generations_per_batch
 
       ! Allocate array for batch keff and entropy
       allocate(k_batch(n_batches))
-      allocate(entropy(n_batches))
+      allocate(entropy(n_batches*gen_per_batch))
+      entropy = ZERO
     end if
 
     ! Fixed source calculation information
@@ -168,9 +177,6 @@ contains
       message = "Number of particles must be greater than zero."
       call fatal_error()
     end if
-
-    ! Turn on tallies if no inactive batches
-    if (n_inactive == 0) tallies_on = .true.
 
     ! Copy random number seed if specified
     if (seed_ > 0) seed = seed_
@@ -348,10 +354,12 @@ contains
     end if
 
     ! Survival biasing
-    if (trim(survival_) == 'on') survival_biasing = .true.
+    call lower_case(survival_)
+    if (survival_ == 'true' .or. survival_ == '1') survival_biasing = .true.
 
     ! Probability tables
-    if (ptables_ == 'off') urr_ptables_on = .false.
+    call lower_case(ptables_)
+    if (ptables_ == 'false' .or. ptables_ == '0') urr_ptables_on = .false.
 
     ! Cutoffs
     if (size(cutoff_) > 0) then
@@ -498,8 +506,9 @@ contains
       end if
 
       ! Check if the user has specified to write binary source file
-      if (trim(state_point_(1) % source_separate) == 'on') &
-           source_separate = .true.
+      call lower_case(state_point_(1) % source_separate)
+      if (state_point_(1) % source_separate == 'true' .or. &
+           state_point_(1) % source_separate == '1') source_separate = .true.
     else
       ! If no <state_point> tag was present, by default write state point at
       ! last batch only
@@ -510,11 +519,14 @@ contains
 
     ! Check if the user has specified to not reduce tallies at the end of every
     ! batch
-    if (trim(no_reduce_) == 'on') reduce_tallies = .false.
+    call lower_case(no_reduce_)
+    if (no_reduce_ == 'true' .or. no_reduce_ == '1') reduce_tallies = .false.
 
     ! Check if the user has specified to use confidence intervals for
     ! uncertainties rather than standard deviations
-    if (trim(confidence_intervals_) == 'on') confidence_intervals = .true.
+    call lower_case(confidence_intervals_)
+    if (confidence_intervals_ == 'true' .or. &
+         confidence_intervals_ == '1') confidence_intervals = .true.
 
     ! Check for output options
     if (associated(output_)) then
@@ -527,12 +539,17 @@ contains
           output_xs = .true.
         case ('tallies')
           output_tallies = .true.
+        case ('none')
+          output_summary = .false.
+          output_xs = .false.
+          output_tallies = .false.
         end select
       end do
     end if
 
     ! check for cmfd run
-    if (run_cmfd_) then
+    call lower_case(run_cmfd_)
+    if (run_cmfd_ == 'true' .or. run_cmfd_ == '1') then
       cmfd_run = .true.
 #ifndef PETSC
       if (master) then
@@ -1192,6 +1209,7 @@ contains
     integer :: i             ! loop over user-specified tallies
     integer :: j             ! loop over words
     integer :: k             ! another loop index
+    integer :: l             ! another loop index
     integer :: i_analog      ! index in analog_tallies array
     integer :: i_tracklength ! index in tracklength_tallies array
     integer :: i_current     ! index in current_tallies array
@@ -1200,9 +1218,15 @@ contains
     integer :: n             ! size of arrays in mesh specification
     integer :: n_words       ! number of words read
     integer :: n_filters     ! number of filters
+    integer :: n_new         ! number of new scores to add based on Pn tally
+    integer :: n_scores      ! number of tot scores after adjusting for Pn tally
+    integer :: n_order       ! Scattering order requested
+    integer :: n_order_pos   ! Position of Scattering order in score name string
+    integer :: MT            ! user-specified MT for score
     logical :: file_exists   ! does tallies.xml file exist?
     character(MAX_LINE_LEN) :: filename
     character(MAX_WORD_LEN) :: word
+    character(MAX_WORD_LEN) :: score_name
     type(ListKeyValueCI), pointer :: key_list => null()
     type(TallyObject),    pointer :: t => null()
     type(StructuredMesh), pointer :: m => null()
@@ -1680,11 +1704,78 @@ contains
       ! READ DATA FOR SCORES
 
       if (associated(tally_(i) % scores)) then
+        ! Loop through scores and determine if a scatter-p# input was used
+        ! to allow for proper pre-allocating of t % score_bins
+        ! This scheme allows multiple scatter-p# to be requested by the user
+        ! if so desired
         n_words = size(tally_(i) % scores)
-        allocate(t % score_bins(n_words))
+        n_new = 0
         do j = 1, n_words
           call lower_case(tally_(i) % scores(j))
-          select case (tally_(i) % scores(j))
+          ! Find if scores(j) is of the form 'scatter-p'
+          ! If so, get the number and do a select case on that.
+          score_name = tally_(i) % scores(j)
+          if (starts_with(score_name,'scatter-p')) then
+            n_order_pos = scan(score_name,'0123456789')
+            n_order = int(str_to_int( &
+              score_name(n_order_pos:(len_trim(score_name)))),4)
+            if (n_order > SCATT_ORDER_MAX) then
+              ! Throw a warning. Set to the maximum number.
+              ! The above scheme will essentially take the absolute value
+              message = "Invalid scattering order of " // trim(to_str(n_order)) // &
+                " requested. Setting to the maximum permissible value, " // &
+                trim(to_str(SCATT_ORDER_MAX))
+              call warning()
+              n_order = SCATT_ORDER_MAX
+              tally_(i) % scores(j) = SCATT_ORDER_MAX_PNSTR
+            end if
+            n_new = n_new + n_order
+          end if
+        end do
+        n_scores = n_words + n_new
+        
+        ! Allocate accordingly
+        allocate(t % score_bins(n_scores))
+        allocate(t % scatt_order(n_scores))
+        t % scatt_order = 0
+        j = 0
+        do l = 1, n_words
+          j = j + 1
+          ! Get the input string in scores(l) but if scatter-n or scatter-pn
+          ! then strip off the n, and store it as an integer to be used later
+          ! Peform the select case on this modified (number removed) string
+          score_name = tally_(i) % scores(l)
+          if (starts_with(score_name,'scatter-p')) then
+            n_order_pos = scan(score_name,'0123456789')
+            n_order = int(str_to_int( &
+              score_name(n_order_pos:(len_trim(score_name)))),4)
+            if (n_order > SCATT_ORDER_MAX) then
+              ! Throw a warning. Set to the maximum number.
+              ! The above scheme will essentially take the absolute value
+              message = "Invalid scattering order of " // trim(to_str(n_order)) // &
+                " requested. Setting to the maximum permissible value, " // &
+                trim(to_str(SCATT_ORDER_MAX))
+              call warning()
+              n_order = SCATT_ORDER_MAX
+            end if
+            score_name = "scatter-pn"
+          else if (starts_with(score_name,'scatter-')) then
+            n_order_pos = scan(score_name,'0123456789')
+            n_order = int(str_to_int( &
+              score_name(n_order_pos:(len_trim(score_name)))),4)
+            if (n_order > SCATT_ORDER_MAX) then
+              ! Throw a warning. Set to the maximum number.
+              ! The above scheme will essentially take the absolute value
+              message = "Invalid scattering order of " // trim(to_str(n_order)) // &
+                " requested. Setting to the maximum permissible value, " // &
+                trim(to_str(SCATT_ORDER_MAX))
+              call warning()
+              n_order = SCATT_ORDER_MAX
+            end if
+            score_name = "scatter-n"
+          end if
+          
+          select case (score_name)
           case ('flux')
             ! Prohibit user from tallying flux for an individual nuclide
             if (.not. (t % n_nuclide_bins == 1 .and. &
@@ -1712,21 +1803,23 @@ contains
 
             ! Set tally estimator to analog
             t % estimator = ESTIMATOR_ANALOG
-          case ('scatter-1')
-            t % score_bins(j) = SCORE_SCATTER_1
-
-            ! Set tally estimator to analog
+          case ('scatter-n')
+            if (n_order == 0) then
+              t % score_bins(j) = SCORE_SCATTER
+            else
+              t % score_bins(j) = SCORE_SCATTER_N
+              ! Set tally estimator to analog
+              t % estimator = ESTIMATOR_ANALOG
+            end if
+            t % scatt_order(j) = n_order
+            
+          case ('scatter-pn')
             t % estimator = ESTIMATOR_ANALOG
-          case ('scatter-2')
-            t % score_bins(j) = SCORE_SCATTER_2
-
-            ! Set tally estimator to analog
-            t % estimator = ESTIMATOR_ANALOG
-          case ('scatter-3')
-            t % score_bins(j) = SCORE_SCATTER_3
-
-            ! Set tally estimator to analog
-            t % estimator = ESTIMATOR_ANALOG
+            ! Setup P0:Pn
+            t % score_bins(j : j + n_order) = SCORE_SCATTER_PN
+            t % scatt_order(j : j + n_order) = n_order
+            j = j + n_order
+            
           case('transport')
             t % score_bins(j) = SCORE_TRANSPORT
 
@@ -1743,20 +1836,14 @@ contains
             ! Set tally estimator to analog
             t % estimator = ESTIMATOR_ANALOG
           case ('n2n')
-            t % score_bins(j) = SCORE_N_2N
+            t % score_bins(j) = N_2N
 
-            ! Set tally estimator to analog
-            t % estimator = ESTIMATOR_ANALOG
           case ('n3n')
-            t % score_bins(j) = SCORE_N_3N
+            t % score_bins(j) = N_3N
 
-            ! Set tally estimator to analog
-            t % estimator = ESTIMATOR_ANALOG
           case ('n4n')
-            t % score_bins(j) = SCORE_N_4N
+            t % score_bins(j) = N_4N
 
-            ! Set tally estimator to analog
-            t % estimator = ESTIMATOR_ANALOG
           case ('absorption')
             t % score_bins(j) = SCORE_ABSORPTION
             if (t % find_filter(FILTER_ENERGYOUT) > 0) then
@@ -1773,6 +1860,12 @@ contains
             end if
           case ('nu-fission')
             t % score_bins(j) = SCORE_NU_FISSION
+            if (t % find_filter(FILTER_ENERGYOUT) > 0) then
+              ! Set tally estimator to analog
+              t % estimator = ESTIMATOR_ANALOG
+            end if
+          case ('kappa-fission')
+            t % score_bins(j) = SCORE_KAPPA_FISSION
           case ('current')
             t % score_bins(j) = SCORE_CURRENT
             t % type = TALLY_SURFACE_CURRENT
@@ -1828,12 +1921,30 @@ contains
             t % score_bins(j) = SCORE_EVENTS
 
           case default
-            message = "Unknown scoring function: " // &
-                 trim(tally_(i) % scores(j))
-            call fatal_error()
+            ! Assume that user has specified an MT number
+            MT = str_to_int(score_name)
+
+            if (MT /= ERROR_INT) then
+              ! Specified score was an integer
+              if (MT > 1) then
+                t % score_bins(j) = MT
+              else
+                message = "Invalid MT on <scores>: " // &
+                     trim(tally_(i) % scores(j))
+                call fatal_error()
+              end if
+
+            else
+              ! Specified score was not an integer
+              message = "Unknown scoring function: " // &
+                   trim(tally_(i) % scores(j))
+              call fatal_error()
+            end if
+
           end select
         end do
-        t % n_score_bins = n_words
+        t % n_score_bins = n_scores
+        t % n_user_score_bins = n_words
       else
         message = "No <scores> specified on tally " // trim(to_str(t % id)) &
              // "."

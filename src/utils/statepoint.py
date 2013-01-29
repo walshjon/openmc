@@ -10,11 +10,86 @@ import scipy.stats
 filter_types = {1: 'universe', 2: 'material', 3: 'cell', 4: 'cellborn',
                 5: 'surface', 6: 'mesh', 7: 'energyin', 8: 'energyout'}
 
-score_types = {-1: 'flux', -2: 'total', -3: 'scatter', -4: 'nu-scatter', 
-               -5: 'scatter-1', -6: 'scatter-2', -7: 'scatter-3', 
-               -8: 'transport', -9: 'diffusion', -10: 'n1n', -11: 'n2n',
-               -12: 'n3n', -13: 'n4n', -14: 'absorption', -15: 'fission',
-                -16: 'nu-fission', -17: 'current', -18: 'events'}
+score_types = {-1: 'flux', 
+                -2: 'total',
+                -3: 'scatter',
+                -4: 'nu-scatter', 
+                -5: 'scatter-n',
+                -6: 'scatter-pn',
+                -7: 'transport',
+                -8: 'diffusion',
+                -9: 'n1n',
+                -10: 'absorption',
+                -11: 'fission',
+                -12: 'nu-fission',
+                -13: 'kappa-fission',
+                -14: 'current',
+                -15: 'events',
+                1: '(n,total)',
+                2: '(n,elastic)',
+                4: '(n,level)',
+                11: '(n,2nd)',
+                16: '(n,2n)',
+                17: '(n,3n)',
+                18: '(n,fission)',
+                19: '(n,f)',
+                20: '(n,nf)',
+                21: '(n,2nf)',
+                22: '(n,na)',
+                23: '(n,n3a)',
+                24: '(n,2na)',
+                25: '(n,3na)',
+                28: '(n,np)',
+                29: '(n,n2a)',
+                30: '(n,2n2a)',
+                32: '(n,nd)',
+                33: '(n,nt)',
+                34: '(n,nHe-3)',
+                35: '(n,nd2a)',
+                36: '(n,nt2a)',
+                37: '(n,4n)',
+                38: '(n,3nf)',
+                41: '(n,2np)',
+                42: '(n,3np)',
+                44: '(n,n2p)',
+                45: '(n,npa)',
+                91: '(n,nc)',
+                101: '(n,disappear)',
+                102: '(n,gamma)',
+                103: '(n,p)',
+                104: '(n,d)',
+                105: '(n,t)',
+                106: '(n,3He)',
+                107: '(n,a)',
+                108: '(n,2a)',
+                109: '(n,3a)',
+                111: '(n,2p)',
+                112: '(n,pa)',
+                113: '(n,t2a)',
+                114: '(n,d2a)',
+                115: '(n,pd)',
+                116: '(n,pt)',
+                117: '(n,da)',
+                201: '(n,Xn)',
+                202: '(n,Xgamma)',
+                203: '(n,Xp)',
+                204: '(n,Xd)',
+                205: '(n,Xt)',
+                206: '(n,X3He)',
+                207: '(n,Xa)',
+                444: '(damage)',
+                649: '(n,pc)',
+                699: '(n,dc)',
+                749: '(n,tc)',
+                799: '(n,3Hec)',
+                849: '(n,tc)'}
+score_types.update({MT: '(n,n' + str(MT-50) + ')' for MT in range(51,91)})
+score_types.update({MT: '(n,p' + str(MT-600) + ')' for MT in range(600,649)})
+score_types.update({MT: '(n,d' + str(MT-650) + ')' for MT in range(650,699)})
+score_types.update({MT: '(n,t' + str(MT-700) + ')' for MT in range(700,749)})
+score_types.update({MT: '(n,3He' + str(MT-750) + ')' for MT in range(750,649)})
+score_types.update({MT: '(n,a' + str(MT-800) + ')' for MT in range(800,849)})
+
 
 class BinaryFile(object):
     def __init__(self, filename):
@@ -80,7 +155,7 @@ class StatePoint(BinaryFile):
 
         # Set flags for what data  was read
         self._metadata = False
-        self._values = False
+        self._results = False
         self._source = False
 
         # Initialize arrays for meshes and tallies
@@ -100,6 +175,9 @@ class StatePoint(BinaryFile):
 
         # Read date and time
         self.date_and_time = self._get_string(19)[0]
+
+        # Read path
+        self.path = self._get_string(255)[0].strip()
 
         # Read random number seed
         self.seed = self._get_long()[0]
@@ -126,9 +204,8 @@ class StatePoint(BinaryFile):
             m = Mesh()
             self.meshes.append(m)
 
-            # Read type of mesh and number of dimensions
-            m.type = self._get_int()[0]
-            n = self._get_int()[0]
+            # Read id, mesh type, and number of dimensions
+            m.id, m.type, n = self._get_int(3)
 
             # Read mesh size, lower-left coordinates, upper-right coordinates,
             # and width of each mesh cell
@@ -145,8 +222,8 @@ class StatePoint(BinaryFile):
             t = Tally()
             self.tallies.append(t)
 
-            # Read number of realizations
-            t.n_realizations = self._get_int()[0]
+            # Read id and number of realizations
+            t.id, t.n_realizations = self._get_int(2)
 
             # Read sizes of tallies
             t.total_score_bins = self._get_int()[0]
@@ -180,9 +257,13 @@ class StatePoint(BinaryFile):
             t.n_nuclides = n_nuclides
             t.nuclides = self._get_int(n_nuclides)
 
-            # Read score bins
+            # Read score bins and scattering order
             t.n_scores = self._get_int()[0]
             t.scores = [score_types[j] for j in self._get_int(t.n_scores)]
+            t.scatt_order = self._get_int(t.n_scores)
+
+            # Read number of user score bins
+            t.n_user_scores = self._get_int()[0]
 
             # Set up stride
             stride = 1
@@ -193,7 +274,7 @@ class StatePoint(BinaryFile):
         # Set flag indicating metadata has already been read
         self._metadata = True
 
-    def read_values(self):
+    def read_results(self):
         # Check whether metadata has been read
         if not self._metadata:
             self._read_metadata()
@@ -214,16 +295,16 @@ class StatePoint(BinaryFile):
 
             for t in self.tallies:
                 n = t.total_score_bins * t.total_filter_bins
-                t.values = np.array(self._get_double(2*n))
-                t.values.shape = (t.total_filter_bins, t.total_score_bins, 2)
+                t.results = np.array(self._get_double(2*n))
+                t.results.shape = (t.total_filter_bins, t.total_score_bins, 2)
 
-        # Indicate that tally values have been read
-        self._values = True
+        # Indicate that tally results have been read
+        self._results = True
 
     def read_source(self):
-        # Check whether tally values have been read
-        if not self._values:
-            self.read_values()
+        # Check whether tally results have been read
+        if not self._results:
+            self.read_results()
 
         for i in range(self.n_particles):
             s = SourceSite()
@@ -273,18 +354,18 @@ class StatePoint(BinaryFile):
 
         # Regular tallies
         for t in self.tallies:
-            for i in range(t.values.shape[0]):
-                for j in range(t.values.shape[1]):
+            for i in range(t.results.shape[0]):
+                for j in range(t.results.shape[1]):
                     # Get sum and sum of squares
-                    s, s2 = t.values[i,j]
+                    s, s2 = t.results[i,j]
                     
                     # Calculate sample mean and replace value
                     s /= n
-                    t.values[i,j,0] = s
+                    t.results[i,j,0] = s
 
                     # Calculate standard deviation
                     if s != 0.0:
-                        t.values[i,j,1] = t_value*sqrt((s2/n - s*s)/(n-1))
+                        t.results[i,j,1] = t_value*sqrt((s2/n - s*s)/(n-1))
 
     def get_value(self, tally_index, spec_list, score_index):
         """Returns a tally score given a list of filters to satisfy.
@@ -304,14 +385,14 @@ class StatePoint(BinaryFile):
 
         score_index : int
             Index corresponding to score for tally, i.e. the second index in
-            Tally.values[:,:,:].
+            Tally.results[:,:,:].
 
         """
 
         # Get Tally object given the index
         t = self.tallies[tally_index]
 
-        # Initialize index for filter in Tally.values[:,:,:]
+        # Initialize index for filter in Tally.results[:,:,:]
         filter_index = 0
 
         # Loop over specified filters in spec_list
@@ -334,7 +415,7 @@ class StatePoint(BinaryFile):
             else:
                 filter_index += f_index*t.filters[f_type].stride
         
-        # Return the desired result from Tally.values. This could be the sum and
+        # Return the desired result from Tally.results. This could be the sum and
         # sum of squares, or it could be mean and stdev if self.generate_stdev()
         # has been called already.
-        return t.values[filter_index, score_index]
+        return t.results[filter_index, score_index]

@@ -112,4 +112,54 @@ contains
 
   end function t_percentile
 
+!===============================================================================
+! CALC_PN calculates the n-th order Legendre polynomial at the value of x.
+! Since this function is called repeatedly during the neutron transport process,
+! neither n or x is checked to see if they are in the applicable range. 
+! This is left to the client developer to use where applicable. x is to be in
+! the domain of [-1,1], and 0<=n<=5. If x is outside of the range, the return
+! value will be outside the expected range; if n is outside the stated range, 
+! the return value will be 1.0.
+!===============================================================================
+  
+  pure function calc_pn(n,x) result(pnx)
+
+    integer, intent(in) :: n   ! Legendre order requested
+    real(8), intent(in) :: x   ! Independent variable the Legendre is to be 
+                               ! evaluated at; x must be in the domain [-1,1]
+    real(8)             :: pnx ! The Legendre poly of order n evaluated at x
+    
+    select case(n)
+    case(1)
+      pnx = x
+    case(2)
+      pnx = 1.5_8 * x * x - 0.5_8
+    case(3)
+      pnx = 2.5_8 * x * x * x - 1.5_8 * x
+    case(4)
+      pnx = 4.375_8 * (x ** 4) - 3.75_8 * x * x + 0.375_8
+    case(5)
+      pnx = 7.875_8 * (x ** 5) - 8.75_8 * x * x * x + 1.875 * x
+    case(6)
+      pnx = 14.4375_8 * (x ** 6) - 19.6875_8 * (x ** 4) + &
+        6.5625_8 * x * x - 0.3125_8
+    case(7) 
+      pnx = 26.8125_8 * (x ** 7) - 43.3125_8 * (x ** 5) + &
+        19.6875_8 * x * x * x - 2.1875_8 * x
+    case(8)
+      pnx = 50.2734375_8 * (x ** 8) - 93.84375_8 * (x ** 6) + &
+        54.140625 * (x ** 4) - 9.84375_8 * x * x + 0.2734375_8
+    case(9)
+      pnx = 94.9609375_8 * (x ** 9) - 201.09375_8 * (x ** 7) + &
+        140.765625_8 * (x ** 5) - 36.09375_8 * x * x * x + 2.4609375_8 * x
+    case(10)
+      pnx = 180.42578125_8 * (x ** 10) - 427.32421875_8 * (x ** 8) + &
+        351.9140625_8 * (x ** 6) - 117.3046875_8 * (x ** 4) + &
+        13.53515625_8 * x * x - 0.24609375_8
+    case default
+      pnx = ONE ! correct for case(0), incorrect for the rest
+    end select
+  
+  end function calc_pn
+
 end module math

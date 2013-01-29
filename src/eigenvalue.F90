@@ -1,4 +1,4 @@
-module criticality
+module eigenvalue
 
 #ifdef MPI
   use mpi
@@ -12,38 +12,45 @@ module criticality
   use mesh,         only: count_bank_sites
   use mesh_header,  only: StructuredMesh
   use output,       only: write_message, header, print_columns,              &
-                          print_batch_keff
+                          print_batch_keff, print_generation
   use physics,      only: transport
   use random_lcg,   only: prn, set_particle_seed, prn_skip
   use search,       only: binary_search
   use source,       only: get_source_particle
   use state_point,  only: write_state_point, replay_batch_history
   use string,       only: to_str
-  use tally,        only: synchronize_tallies, setup_active_usertallies
+  use tally,        only: synchronize_tallies, setup_active_usertallies, &
+                          reset_result
   use timing,       only: timer_start, timer_stop
 
 #ifdef HDF5
   use hdf5_interface, only: hdf5_write_state_point
 #endif
 
+  private
+  public :: run_eigenvalue
+
 contains
 
 !===============================================================================
-! RUN_CRITICALITY encompasses all the main logic where iterations are performed
-! over the batches, generations, and histories.
+! RUN_EIGENVALUE encompasses all the main logic where iterations are performed
+! over the batches, generations, and histories in a k-eigenvalue calculation.
 !===============================================================================
 
-  subroutine run_criticality()
+  subroutine run_eigenvalue()
 
     integer(8) :: i  ! index over individual particles
 
-    if (master) call header("CRITICALITY TRANSPORT SIMULATION", level=1)
+    if (master) call header("K EIGENVALUE SIMULATION", level=1)
 
     ! Allocate particle
     allocate(p)
 
     ! Display column titles
     call print_columns()
+
+    ! Turn on inactive timer
+    call timer_start(time_inactive)
 
     ! ==========================================================================
     ! LOOP OVER BATCHES
@@ -86,6 +93,12 @@ contains
         call synchronize_bank()
         call timer_stop(time_bank)
 
+        ! Calculate shannon entropy
+        if (entropy_on) call shannon_entropy()
+
+        ! Write generation output
+        if (master .and. current_gen /= gen_per_batch) call print_generation()
+
       end do GENERATION_LOOP
 
       call finalize_batch()
@@ -99,7 +112,7 @@ contains
 
     if (master) call header("SIMULATION FINISHED", level=1)
 
-  end subroutine run_criticality
+  end subroutine run_eigenvalue
 
 !===============================================================================
 ! INITIALIZE_BATCH
@@ -113,18 +126,21 @@ contains
     ! Reset total starting particle weight used for normalizing tallies
     total_weight = ZERO
 
+    if (current_batch == n_inactive + 1) then
+      ! Switch from inactive batch timer to active batch timer
+      call timer_stop(time_inactive)
+      call timer_start(time_active)
+
+      ! Enable active batches (and tallies_on if it hasn't been enabled)
+      active_batches = .true.
+      tallies_on = .true.
+
+      ! Add user tallies to active tallies list
+      call setup_active_usertallies()
+    end if
+
     ! check CMFD initialize batch
     if (cmfd_run) call cmfd_init_batch()
-
-    if (current_batch == n_inactive + 1) then
-      ! This will start the active timer at the first non-inactive batch
-      ! (including batch 1 if there are no inactive batches).
-      call timer_start(time_active)
-    elseif (current_batch == 1) then
-      ! If there are inactive batches, start the inactive timer on the first
-      ! batch.
-      call timer_start(time_inactive)
-    end if
 
   end subroutine initialize_batch
 
@@ -153,14 +169,9 @@ contains
     integer :: i ! loop index for state point batches
 
     ! Collect tallies
-    if (tallies_on) then
-      call timer_start(time_tallies)
-      call synchronize_tallies()
-      call timer_stop(time_tallies)
-    end if
-
-    ! Calculate shannon entropy
-    if (entropy_on) call shannon_entropy()
+    call timer_start(time_tallies)
+    call synchronize_tallies()
+    call timer_stop(time_tallies)
 
     ! Collect results and statistics
     call calculate_keff()
@@ -183,15 +194,6 @@ contains
         exit
       end if
     end do
-
-    ! Turn tallies on once inactive batches are complete
-    if (current_batch == n_inactive) then
-      tallies_on = .true.
-      active_batches = .true.
-      call timer_stop(time_inactive)
-      call timer_start(time_active)
-      call setup_active_usertallies()
-    end if
 
   end subroutine finalize_batch
 
@@ -463,6 +465,7 @@ contains
 
   subroutine shannon_entropy()
 
+    integer :: ent_idx        ! entropy index
     integer :: i, j, k        ! index for bank sites
     integer :: n              ! # of boxes in each dimension
     logical :: sites_outside  ! were there sites outside entropy box?
@@ -513,12 +516,13 @@ contains
       ! Normalize to total weight of bank sites
       entropy_p = entropy_p / sum(entropy_p)
 
-      entropy(current_batch) = ZERO
+      ent_idx = current_gen + gen_per_batch*(current_batch - 1)
+      entropy(ent_idx) = ZERO
       do i = 1, m % dimension(1)
         do j = 1, m % dimension(2)
           do k = 1, m % dimension(3)
             if (entropy_p(1,i,j,k) > ZERO) then
-              entropy(current_batch) = entropy(current_batch) - &
+              entropy(ent_idx) = entropy(ent_idx) - &
                    entropy_p(1,i,j,k) * log(entropy_p(1,i,j,k))/log(TWO)
             end if
           end do
@@ -545,10 +549,8 @@ contains
     ! =========================================================================
     ! SINGLE-BATCH ESTIMATE OF K-EFFECTIVE
 
-    if (.not. active_batches) k_batch(current_batch) = global_tallies(K_ANALOG) % value
-
 #ifdef MPI
-    if ((.not. active_batches) .or. (.not. reduce_tallies)) then
+    if (.not. reduce_tallies) then
       ! Reduce value of k_batch if running in parallel
       if (master) then
         call MPI_REDUCE(MPI_IN_PLACE, k_batch(current_batch), 1, MPI_REAL8, &
@@ -567,77 +569,71 @@ contains
            (n_particles * gen_per_batch)
     end if
 
-    if (active_batches) then
-      ! =======================================================================
-      ! ACTIVE BATCHES
+    ! =========================================================================
+    ! ACCUMULATED K-EFFECTIVE AND ITS VARIANCE
 
-      if (reduce_tallies) then
-        ! In this case, global_tallies has already been reduced, so we don't
-        ! need to perform any more reductions and just take the values from
-        ! global_tallies directly
+    if (reduce_tallies) then
+      ! In this case, global_tallies has already been reduced, so we don't
+      ! need to perform any more reductions and just take the values from
+      ! global_tallies directly
 
-        ! Sample mean of keff
-        keff = global_tallies(K_ANALOG) % sum / n_realizations
+      ! Sample mean of keff
+      keff = global_tallies(K_TRACKLENGTH) % sum / n_realizations
 
-        if (n_realizations > 1) then
-          if (confidence_intervals) then
-            ! Calculate t-value for confidence intervals
-            alpha = ONE - CONFIDENCE_LEVEL
-            t_value = t_percentile(ONE - alpha/TWO, n_realizations - 1)
-          else
-            t_value = ONE
-          end if
-
-          ! Standard deviation of the sample mean of k
-          keff_std = t_value * sqrt((global_tallies(K_ANALOG) % sum_sq / &
-               n_realizations - keff * keff) / (n_realizations - 1))
+      if (n_realizations > 1) then
+        if (confidence_intervals) then
+          ! Calculate t-value for confidence intervals
+          alpha = ONE - CONFIDENCE_LEVEL
+          t_value = t_percentile(ONE - alpha/TWO, n_realizations - 1)
+        else
+          t_value = ONE
         end if
-      else
-        ! In this case, no reduce was ever done on global_tallies. Thus, we
-        ! need to reduce the values in sum and sum^2 to get the sample mean
-        ! and its standard deviation
+
+        ! Standard deviation of the sample mean of k
+        keff_std = t_value * sqrt((global_tallies(K_TRACKLENGTH) % sum_sq / &
+             n_realizations - keff * keff) / (n_realizations - 1))
+      end if
+    else
+      ! In this case, no reduce was ever done on global_tallies. Thus, we need
+      ! to reduce the values in sum and sum^2 to get the sample mean and its
+      ! standard deviation
 
 #ifdef MPI
-        call MPI_REDUCE(global_tallies(K_ANALOG) % sum, temp, 2, &
-             MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
+      call MPI_REDUCE(global_tallies(K_TRACKLENGTH) % sum, temp, 2, &
+           MPI_REAL8, MPI_SUM, 0, MPI_COMM_WORLD, mpi_err)
 #else
-        temp(1) = global_tallies(K_ANALOG) % sum
-        temp(2) = global_tallies(K_ANALOG) % sum_sq
+      temp(1) = global_tallies(K_TRACKLENGTH) % sum
+      temp(2) = global_tallies(K_TRACKLENGTH) % sum_sq
 #endif
 
-        ! Sample mean of k
-        keff = temp(1) / n_realizations
+      ! Sample mean of k
+      keff = temp(1) / n_realizations
 
-        if (n_realizations > 1) then
-          if (confidence_intervals) then
-            ! Calculate t-value for confidence intervals
-            alpha = ONE - CONFIDENCE_LEVEL
-            t_value = t_percentile(ONE - alpha/TWO, n_realizations - 1)
-          else
-            t_value = ONE
-          end if
-
-          ! Standard deviation of the sample mean of k
-          keff_std = t_value * sqrt((temp(2)/n_realizations - keff*keff) / &
-               (n_realizations - 1))
+      if (n_realizations > 1) then
+        if (confidence_intervals) then
+          ! Calculate t-value for confidence intervals
+          alpha = ONE - CONFIDENCE_LEVEL
+          t_value = t_percentile(ONE - alpha/TWO, n_realizations - 1)
+        else
+          t_value = ONE
         end if
+
+        ! Standard deviation of the sample mean of k
+        keff_std = t_value * sqrt((temp(2)/n_realizations - keff*keff) / &
+             (n_realizations - 1))
       end if
-
-    else
-      ! =======================================================================
-      ! INACTIVE BATCHES
-
-      ! Set keff
-      keff = k_batch(current_batch)
-
-      ! Reset tally values
-      global_tallies(:) % value = ZERO
     end if
 
 #ifdef MPI
     ! Broadcast new keff value to all processors
     call MPI_BCAST(keff, 1, MPI_REAL8, 0, MPI_COMM_WORLD, mpi_err)
 #endif
+
+    ! Reset global tally results
+    if (.not. active_batches) then
+      call reset_result(global_tallies)
+      n_realizations = 0
+    end if
 
   end subroutine calculate_keff
 
@@ -692,4 +688,4 @@ contains
 
   end subroutine count_source_for_ufs
 
-end module criticality
+end module eigenvalue
