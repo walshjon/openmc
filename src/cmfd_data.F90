@@ -55,10 +55,11 @@ contains
 
     use constants,        only: FILTER_MESH, FILTER_ENERGYIN, FILTER_ENERGYOUT,     &
                                 FILTER_SURFACE, IN_RIGHT, OUT_RIGHT, IN_FRONT,      &
-                                OUT_FRONT, IN_TOP, OUT_TOP, CMFD_NOACCEL, ZERO, ONE
+                                OUT_FRONT, IN_TOP, OUT_TOP, CMFD_NOACCEL, ZERO,     &
+                                ONE, ZERO_FLUX, TINY_BIT
     use error,            only: fatal_error
     use global,           only: cmfd, message, n_user_tallies, n_tallies, tallies,  &
-                                meshes
+                                meshes, cmfd_difcof
     use mesh,             only: mesh_indices_to_bin
     use mesh_header,      only: StructuredMesh
     use tally_diffusion,  only: calculate_diffusion
@@ -310,10 +311,12 @@ contains
     end do TAL
 
     ! calculate anisotropic DC
-    call calculate_diffusion(difcof,ng,nx,ny,nz)
-    cmfd % diffcof = difcof
-    write(888,*) cmfd % diffcof
-    stop
+    if (cmfd_difcof) then
+      call calculate_diffusion(difcof,ng,nx,ny,nz)
+      where (abs(difcof - ZERO_FLUX) > TINY_BIT)
+        cmfd % diffcof = difcof
+      end where
+    end if
 
     ! normalize openmc source distribution
     cmfd % openmc_src = cmfd % openmc_src/sum(cmfd % openmc_src)*cmfd%norm

@@ -175,6 +175,10 @@ contains
     if (master) write(OUTPUT_UNIT,'(A,1X,I0,1X,A)') "CMFD Running on", &
        n_procs_cmfd," processors."
 
+    ! read diffusion coefficient option
+    if (difcof_ == 'true' .or. difcof_ == '1') &
+         cmfd_difcof = .true.
+
   end subroutine read_cmfd_xml
 
 !===============================================================================

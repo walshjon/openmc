@@ -368,6 +368,9 @@ module global
   ! tolerance on keff to run cmfd
   real(8) :: cmfd_keff_tol = 0.005_8
 
+  ! use corrected diffusion coefficients
+  logical :: cmfd_difcof = .false.
+
   ! Information about state points to be written
   integer :: n_state_points = 0
   integer, allocatable :: statepoint_batch(:)
