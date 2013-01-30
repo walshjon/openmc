@@ -568,9 +568,9 @@ contains
 
     use xml_data_geometry_t
 
-    integer :: i, j, k
+    integer :: i, j, k, m
     integer :: n
-    integer :: n_x, n_y
+    integer :: n_x, n_y, n_z
     integer :: universe_num
     integer :: n_cells_in_univ
     integer :: coeffs_reqd
@@ -580,7 +580,7 @@ contains
     character(MAX_WORD_LEN) :: word
     type(Cell),    pointer :: c => null()
     type(Surface), pointer :: s => null()
-    type(Lattice), pointer :: l => null()
+    type(Lattice), pointer :: lat => null()
 
     ! Display output message
     message = "Reading geometry XML file..."
@@ -872,19 +872,19 @@ contains
     allocate(lattices(n_lattices))
 
     do i = 1, n_lattices
-      l => lattices(i)
+      lat => lattices(i)
 
       ! ID of lattice
-      l % id = lattice_(i) % id
+      lat % id = lattice_(i) % id
 
       ! Read lattice type
       word = lattice_(i) % type
       call lower_case(word)
       select case (trim(word))
       case ('rect', 'rectangle', 'rectangular')
-        l % type = LATTICE_RECT
+        lat % type = LATTICE_RECT
       case ('hex', 'hexagon', 'hexagonal')
-        l % type = LATTICE_HEX
+        lat % type = LATTICE_HEX
       case default
         message = "Invalid lattice type: " // trim(lattice_(i) % type)
         call fatal_error()
@@ -896,10 +896,10 @@ contains
         message = "Lattice must be two or three dimensions."
         call fatal_error()
       end if
-      n_x = lattice_(i) % dimension(1)
-      n_y = lattice_(i) % dimension(2)
-      l % n_x = n_x
-      l % n_y = n_y
+
+      lat % n_dimension = n
+      allocate(lat % dimension(n))
+      lat % dimension = lattice_(i) % dimension
 
       ! Read lattice lower-left location
       if (size(lattice_(i) % dimension) /= size(lattice_(i) % lower_left)) then
@@ -907,8 +907,9 @@ contains
              "the number of entries on <dimension>."
         call fatal_error()
       end if
-      l % x0 = lattice_(i) % lower_left(1)
-      l % y0 = lattice_(i) % lower_left(2)
+
+      allocate(lat % lower_left(n))
+      lat % lower_left = lattice_(i) % lower_left
 
       ! Read lattice widths
       if (size(lattice_(i) % width) /= size(lattice_(i) % lower_left)) then
@@ -916,19 +917,39 @@ contains
              "the number of entries on <lower_left>."
         call fatal_error()
       end if
-      l % width_x = lattice_(i) % width(1)
-      l % width_y = lattice_(i) % width(2)
+
+      allocate(lat % width(n))
+      lat % width = lattice_(i) % width
+
+      ! Copy number of dimensions
+      n_x = lat % dimension(1)
+      n_y = lat % dimension(2)
+      if (lat % n_dimension == 3) then
+        n_z = lat % dimension(3)
+      else
+        n_z = 1
+      end if
+      allocate(lat % universes(n_x, n_y, n_z))
+
+      ! Check that number of universes matches size
+      if (size(lattice_(i) % universes) /= n_x*n_y*n_z) then
+        message = "Number of universes on <universes> does not match size of &
+             &lattice " // trim(to_str(lat % id)) // "."
+        call fatal_error()
+      end if
 
       ! Read universes
-      allocate(l % element(n_x, n_y))
-      do k = 0, n_y - 1
-        do j = 1, n_x
-          l % element(j, n_y - k) = lattice_(i) % universes(j + k*n_x)
+      do m = 1, n_z
+        do k = 0, n_y - 1
+          do j = 1, n_x
+            lat % universes(j, n_y - k, m) = lattice_(i) % &
+                 universes(j + n_x*k + n_x*n_y*(m-1))
+          end do
         end do
       end do
-
+        
       ! Add lattice to dictionary
-      call lattice_dict % add_key(l % id, i)
+      call lattice_dict % add_key(lat % id, i)
 
     end do
 

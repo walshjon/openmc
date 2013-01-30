@@ -36,7 +36,7 @@ PETSC_DIR = /opt/petsc/3.3-$(COMPILER)
 # Add git SHA-1 hash
 #===============================================================================
 
-GIT_SHA1 = $(shell git log -1 | head -n 1 | awk '{print $$2}')
+GIT_SHA1 = $(shell git log -1 2>/dev/null | head -n 1 | awk '{print $$2}')
 
 #===============================================================================
 # GNU Fortran compiler options
@@ -224,11 +224,13 @@ xml-fortran:
 $(program): $(objects)
 	$(F90) $(objects) $(templates) $(xml_fort) -o $@ $(LDFLAGS)
 install:
-	@cp $(program) $(prefix)/bin
-	@cp ../man/man1/openmc.1 $(prefix)/share/man/man1
+	@install -D $(program) $(DESTDIR)$(prefix)/bin/$(program)
+	@install -D ../man/man1/openmc.1 $(DESTDIR)$(prefix)/share/man/man1/openmc.1
+	@install -D ../LICENSE $(DESTDIR)$(prefix)/share/doc/$(program)/copyright
 uninstall:
-	@rm $(prefix)/bin/$(program)
-	@rm $(prefix)/share/man/man1/openmc.1
+	@rm $(DESTDIR)$(prefix)/bin/$(program)
+	@rm $(DESTDIR)$(prefix)/share/man/man1/openmc.1
+	@rm $(DESTDIR)$(prefix)/share/doc/$(program)/copyright
 distclean: clean
 	cd xml-fortran; make clean
 	cd templates; make clean

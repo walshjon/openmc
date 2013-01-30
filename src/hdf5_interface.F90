@@ -159,20 +159,21 @@ contains
 
   subroutine hdf5_write_geometry()
 
-    integer          :: i, j, k
+    integer          :: i, j, k, m
+    integer          :: n_x, n_y, n_z
     integer(HSIZE_T) :: dims(1)
-    integer(HSIZE_T) :: dims2(2)
+    integer(HSIZE_T) :: dims3(3)
     integer(HID_T)   :: geometry_group
     integer(HID_T)   :: cell_group
     integer(HID_T)   :: surface_group
     integer(HID_T)   :: universe_group
     integer(HID_T)   :: lattice_group
     integer(HID_T)   :: temp_group
-    integer, allocatable :: lattice_universes(:,:)
+    integer, allocatable :: lattice_universes(:,:,:)
     type(Cell),     pointer :: c => null()
     type(Surface),  pointer :: s => null()
     type(Universe), pointer :: u => null()
-    type(Lattice),  pointer :: l => null()
+    type(Lattice),  pointer :: lat => null()
 
     ! Create group for geometry
     call h5gcreate_f(hdf5_output_file, "/geometry", geometry_group, hdf5_err)
@@ -355,14 +356,14 @@ contains
 
     ! Write information on each lattice
     do i = 1, n_lattices
-      l => lattices(i)
+      lat => lattices(i)
 
       ! Create group for i-th lattice
-      call h5gcreate_f(lattice_group, "lattice " // trim(to_str(l % id)), &
+      call h5gcreate_f(lattice_group, "lattice " // trim(to_str(lat % id)), &
            temp_group, hdf5_err)
 
       ! Write lattice type
-      select case(l % type)
+      select case(lat % type)
       case (LATTICE_RECT)
         call h5ltmake_dataset_string_f(temp_group, "type", "rectangular", hdf5_err)
       case (LATTICE_HEX)
@@ -370,23 +371,34 @@ contains
       end select
 
       ! Write lattice dimensions, lower left corner, and width of element
-      dims(1) = 2
-      call h5ltmake_dataset_int_f(temp_group, "n_elements", 1, dims, &
-           (/ l % n_x, l % n_y /), hdf5_err)
+      dims(1) = lat % n_dimension
+      call h5ltmake_dataset_int_f(temp_group, "dimension", 1, dims, &
+           lat % dimension, hdf5_err)
       call h5ltmake_dataset_double_f(temp_group, "lower_left", 1, dims, &
-           (/ l % x0, l % y0 /), hdf5_err)
-      call h5ltmake_dataset_double_f(temp_group, "element_width", 1, dims, &
-           (/ l % width_x, l % width_y /), hdf5_err)
+           lat % lower_left, hdf5_err)
+      call h5ltmake_dataset_double_f(temp_group, "width", 1, dims, &
+           lat % width, hdf5_err)
 
-      ! Write lattice elements
-      allocate(lattice_universes(l % n_x, l % n_y))
-      do j = 1, l % n_x
-        do k = 1, l % n_y
-          lattice_universes(j,k) = universes(l % element(j,k)) % id
+      ! Determine dimensions of lattice
+      n_x = lat % dimension(1)
+      n_y = lat % dimension(2)
+      if (lat % n_dimension == 3) then
+        n_z = lat % dimension(3)
+      else
+        n_z = 1
+      end if
+        
+      ! Write lattice universes
+      allocate(lattice_universes(n_x, n_y, n_z))
+      do j = 1, n_x
+        do k = 1, n_y
+          do m = 1, n_z
+            lattice_universes(j,k,m) = universes(lat % universes(j,k,m)) % id
+          end do
         end do
       end do
-      dims2 = (/ l % n_x, l % n_y /)
-      call h5ltmake_dataset_int_f(temp_group, "elements", 2, dims2, &
+      dims3 = (/ n_x, n_y, n_z /)
+      call h5ltmake_dataset_int_f(temp_group, "universes", 3, dims3, &
            lattice_universes, hdf5_err)
       deallocate(lattice_universes)
 
