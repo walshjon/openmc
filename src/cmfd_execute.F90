@@ -25,7 +25,6 @@ contains
 
     use cmfd_data,              only: set_up_cmfd
     use cmfd_message_passing,   only: petsc_init_mpi, cmfd_bcast
-    use cmfd_output,            only: write_hdf5_output
     use cmfd_power_solver,      only: cmfd_power_execute
     use cmfd_snes_solver,       only: cmfd_snes_execute
     use error,                  only: warning, fatal_error 
@@ -119,9 +118,6 @@ contains
 
     ! calculate weight factors
     if (cmfd_feedback) call cmfd_reweight(.true.)
-
-    ! write output
-    if (cmfd_write_hdf5 .and. master) call write_hdf5_output()
 
     ! stop cmfd timer
     if (master) then
@@ -475,7 +471,7 @@ contains
 
   subroutine cmfd_tally_reset()
 
-    use global,  only: n_user_tallies, n_tallies, tallies, message
+    use global,  only: n_cmfd_tallies, cmfd_tallies, message
     use output,  only: write_message
     use tally,   only: reset_result
 
@@ -486,11 +482,11 @@ contains
     call write_message(7)
 
     ! begin loop around CMFD tallies
-    do i = n_user_tallies + 1, n_tallies
+    do i = 1, n_cmfd_tallies
 
       ! reset that tally
-      tallies(i) % n_realizations = 0
-      call reset_result(tallies(i) % results)
+      cmfd_tallies(i) % n_realizations = 0
+      call reset_result(cmfd_tallies(i) % results)
 
     end do
 

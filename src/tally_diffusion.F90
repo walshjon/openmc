@@ -3,6 +3,7 @@ module tally_diffusion
   use constants
 
   ! module options
+  implicit none
   private
   public :: create_diffusion_tally, calculate_diffusion
 
@@ -175,9 +176,7 @@ contains
 
     use error,         only: fatal_error
     use global,        only: default_xs, nuclide_dict, message, &
-                             difcof_mesh, mesh_dict, meshes, &
-                             n_user_analog_tallies, n_user_tallies, &
-                             analog_tallies
+                             difcof_mesh, mesh_dict, meshes
     use mesh_header,   only: StructuredMesh
     use tally_header,  only: TallyObject, TallyFilter
 
@@ -216,9 +215,6 @@ contains
 
     ! set estimator to analog
     t % estimator = ESTIMATOR_ANALOG
-
-    ! set tally id
-    t % id = n_user_tallies + 4 
 
     ! set tally label
     t % label = 'DIFFUSION COEFFICIENT'
@@ -267,7 +263,7 @@ contains
 ! CALCULATE_DIFFUSION
 !===============================================================================
 
-  subroutine calculate_diffusion(diff_out,ng,nx,ny,nz)
+  subroutine calculate_diffusion(t,diff_out,ng,nx,ny,nz)
 
     use error,         only: fatal_error
     use global,        only: meshes, tallies, difcof_mesh, n_user_tallies, &
@@ -282,6 +278,7 @@ contains
     integer :: ny                     ! number of mesh cells in y direction
     integer :: nz                     ! number of mesh cells in x direction
     real(8) :: diff_out(2,nx,ny,nz)   ! output diffusion coefficients
+    type(TallyObject), pointer :: t   ! tally object
 
     ! local variables
     integer :: g                    ! iteration counter for groups
@@ -292,17 +289,13 @@ contains
     integer :: ijk(3)               ! indices for mesh cells
     integer :: filter_index         ! index to pull from tally object
     integer :: score_index          ! index to pull from tally object
-    integer :: bins(N_FILTER_TYPES) ! bins for filters
     integer :: i_score              ! score number
     integer :: i_nuclide            ! nuclide number
     integer :: i_filter_mesh        ! index for mesh filter
     integer :: i_filter_ein         ! index for incoming energy filter
-    integer :: i_filter_nuclide     ! index for nuclide filter
     type(StructuredMesh), pointer :: m => null()
-    type(TallyObject), pointer :: t => null()
 
     ! set pointers
-    t => tallies(n_user_tallies + 4)
     i_mesh = t % filters(t % find_filter(FILTER_MESH)) % int_bins(1)
     m => meshes(i_mesh)
 
