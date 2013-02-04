@@ -293,8 +293,8 @@ module global
   ! number of processors for cmfd
   integer :: n_procs_cmfd
 
-  ! reset dhats to zero
-  logical :: dhat_reset = .false.
+  ! equivalence dhat parameter active? 
+  logical :: cmfd_equivalence = .true.
 
   ! activate neutronic feedback
   logical :: cmfd_feedback = .false.

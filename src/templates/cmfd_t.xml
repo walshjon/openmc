@@ -36,5 +36,6 @@
   <variable name="inactive_flush_" tag="inactive_flush" type="integer"       default="9999"                 />
   <variable name="num_flushes_"    tag="num_flushes"    type="integer"       default="1"                    />
   <variable name="difcof_"         tag="difcof"         type="word"          length="5"                     />
+  <variable name="equivalence_"    tag="equivalence"    type="word"          length="5"                     />
 
 </template>

@@ -10,8 +10,6 @@ module cmfd_data
   private
   public :: set_up_cmfd, neutron_balance
 
-  logical :: dhat_reset = .false.
-
 contains
 
 !==============================================================================
@@ -184,12 +182,6 @@ contains
 !               cmfd % diffcof(h,i,j,k) = ONE/(3.0_8*cmfd%totalxs(h,i,j,k))
                 cmfd % diffcof(h,i,j,k) = ONE/(3.0_8*(cmfd % totalxs(h,i,j,k) - &
                      cmfd % p1scattxs(h,i,j,k)))
-!               cmfd % diffcof(h,i,j,k) = cmfd % diffusion(h,i,j,k)
-!               if (h == 1) then
-!                 cmfd % diffcof(h,i,j,k) = 15._8
-!               else
-!                 cmfd % diffcof(h,i,j,k) = 5._8
-!               end if
 
               else if (ital == 2) then
 
@@ -655,7 +647,7 @@ contains
   subroutine compute_dhat()
 
     use constants,  only: CMFD_NOACCEL, ZERO
-    use global,     only: cmfd, cmfd_coremap
+    use global,     only: cmfd, cmfd_coremap, cmfd_equivalence
 
     integer :: nx                 ! maximum number of cells in x direction
     integer :: ny                 ! maximum number of cells in y direction
@@ -782,7 +774,7 @@ contains
               cmfd%dhat(l,g,i,j,k) = dhat
 
               ! check for dhat reset
-              if (dhat_reset) cmfd%dhat(l,g,i,j,k) = ZERO
+              if (.not. cmfd_equivalence) cmfd%dhat(l,g,i,j,k) = ZERO
 
             end do LEAK
 
@@ -842,7 +834,7 @@ contains
 
   subroutine fix_2_grp()
 
-    use global,  only: cmfd
+    use global,  only: cmfd, cmfd_equivalence
 
     ! overwrite cross sections
     cmfd % totalxs(1,:,:,:) = 0.02597_8
@@ -862,7 +854,7 @@ contains
     cmfd % hxyz(3,:,:,:) = 0.5_8
 
     ! set dhat reset to true
-    dhat_reset = .true.
+    cmfd_equivalence = .false.
 
   end subroutine fix_2_grp
 

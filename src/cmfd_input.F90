@@ -179,6 +179,10 @@ contains
     if (difcof_ == 'true' .or. difcof_ == '1') &
          cmfd_difcof = .true.
 
+    ! read in equivalence option
+    if (equivalence_ == 'false' .or. equivalence_ == '0') &
+          cmfd_equivalence = .false.
+
   end subroutine read_cmfd_xml
 
 !===============================================================================
