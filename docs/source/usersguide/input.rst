@@ -62,7 +62,7 @@ settings.xml file.
 ----------------------------------
 
 The ``<confidence_intervals>`` element has no attributes and has an accepted
-value of "true" or "flase". If set to "true", uncertainties on tally results
+value of "true" or "false". If set to "true", uncertainties on tally results
 will be reported as the half-width of the 95% two-sided confidence interval. If
 set to "false", uncertainties on tally results will be reported as the sample
 standard deviation.
@@ -354,6 +354,12 @@ attributes/sub-elements:
     directly.
 
     *Default*: false
+
+  :source_write: If this element is set to "false", source sites are not written
+    to the state point file. This can substantially reduce the size of state
+    points if large numbers of particles per batch are used.
+
+    *Default*: true
 
 ``<survival_biasing>`` Element
 ------------------------------
@@ -691,6 +697,26 @@ Each ``material`` element can have the following attributes or sub-elements:
 
     *Default*: None
 
+  :element:
+
+    Specifies that a natural element is present in the material. The natural
+    element is split up into individual isotopes based on IUPAC Isotopic
+    Compositions of the Elements 1997. This element has attributes/sub-elements
+    called ``name``, ``xs``, and ``ao``. The ``name`` attribute is the atomic
+    symbol of the element while the ``xs`` attribute is the cross-section
+    identifier. Finally, the ``ao`` attribute specifies the atom percent of the
+    element within the material, respectively. One example would be as follows:
+
+    .. code-block:: xml
+
+        <element name="Al" ao="8.7115e-03" />
+        <element name="Mg" ao="1.5498e-04" />
+        <element name="Mn" ao="2.7426e-05" />
+        <element name="Cu" ao="1.6993e-04" />
+
+    *Default*: None
+
+
   :sab:
     Associates an S(a,b) table with the material. This element has
     attributes/sub-elements called ``name`` and ``xs``. The ``name`` attribute
@@ -729,7 +755,8 @@ filters can be used for a tally. The following types of filter are available:
 cell, universe, material, surface, birth region, pre-collision energy,
 post-collision energy, and an arbitrary structured mesh.
 
-The two valid elements in the tallies.xml file are ``<tally>`` and ``<mesh>``.
+The three valid elements in the tallies.xml file are ``<tally>``, ``<mesh>``,
+and ``<assume_separate>``.
 
 ``<tally>`` Element
 -------------------
@@ -741,12 +768,58 @@ The ``<tally>`` element accepts the following sub-elements:
     for output purposes. This string is limited to 52 characters for formatting 
     purposes.
 
-  :filters:
-    A list of filters to specify what region of phase space should contribute to
-    the tally. See below for full details on what filters are available.
+  :filter:
+    Specify a filter that restricts contributions to the tally to particles
+    within certain regions of phase space. This element and its
+    attributes/sub-elements are described below.
+
+    .. note::
+        You may specify zero, one, or multiple filters to apply to the tally. To
+        specify multiple filters, you must use multiple ``<filter>`` elements.
+
+    The ``filter`` element has the following attributes/sub-elements:
+
+      :type:
+        The type of the filter. Accepted options are "cell", "cellborn", "material",
+        "universe", "energy", "energyout", and "mesh".
+
+      :bins:
+        For each filter type, the corresponding ``bins`` entry is given as follows:
+
+        :cell:
+          A list of cells in which the tally should be accumulated.
+
+        :cellborn:
+          This filter allows the tally to be scored to only when particles were
+          originally born in a specified cell.
+
+        :surface:
+          A list of surfaces for which the tally should be accumulated.
+
+        :material:
+          A list of materials for which the tally should be accumulated.
+
+        :universe:
+          A list of universes for which the tally should be accumulated.
+
+        :energy:
+          A monotonically increasing list of bounding **pre-collision** energies
+          for a number of groups. For example, if this filter is specified as
+          ``<filter type="energy" bins="0.0 1.0 20.0" />``, then two energy bins
+          will be created, one with energies between 0 and 1 MeV and the other
+          with energies between 1 and 20 MeV.
+
+        :energyout:
+          A monotonically increasing list of bounding **post-collision**
+          energies for a number of groups. For example, if this filter is
+          specified as ``<filter type="energyout" bins="0.0 1.0 20.0" />``, then
+          two post-collision energy bins will be created, one with energies
+          between 0 and 1 MeV and the other with energies between 1 and 20 MeV.
+
+        :mesh:
+          The ``id`` of a structured mesh to be tallied over.
 
   :nuclides:
-
     If specified, the scores listed will be for particular nuclides, not the
     summation of reactions from all nuclides. The format for nuclides should be
     [Atomic symbol]-[Mass number], e.g. "U-235". The reaction rate for all
@@ -761,92 +834,69 @@ The ``<tally>`` element accepts the following sub-elements:
     *Default*: total
 
   :scores:
-    The desired responses to be accumulated. See below for full details on the
-    responses which be tallied.
+    A space-separated list of the desired responses to be accumulated. Accepted
+    options are "flux", "total", "scatter", "nu-scatter", "scatter-N",
+    "scatter-PN", "absorption", "fission", "nu-fission", "kappa-fission",
+    "current", and "events". These corresponding to the following physical
+    quantities.
 
-The following filters can be specified for a tally:
+    :flux:
+      Total flux
 
-  :cell:
-    A list of cells in which the tally should be accumulated.
+    :total:
+      Total reaction rate
 
-  :cellborn:
-    This filter allows the tally to be scored to only when particles were
-    originally born in a specified cell.
+    :scatter:
+      Total scattering rate. Can also be identified with the ``scatter-0``
+      response type.
 
-  :surface:
-    A list of surfaces for which the tally should be accumulated.
+    :nu-scatter:
+      Total production of neutrons due to scattering. This accounts for
+      multiplicity from (n,2n), (n,3n), and (n,4n) reactions and should be
+      slightly higher than the scattering rate.
 
-  :material:
-    A list of materials for which the tally should be accumulated.
-
-  :universe:
-    A list of universes for which the tally should be accumulated.
-
-  :energy:
-    A monotonically increasing list of bounding **pre-collision** energies for a
-    number of groups. For example, if this filter is specified as ``<energy>0.0
-    1.0 20.0</energy>``, then two energy bins will be created, one with energies
-    between 0 and 1 MeV and the other with energies between 1 and 20 MeV.
-
-  :energyout:
-    A monotonically increasing list of bounding **post-collision** energies for
-    a number of groups. For example, if this filter is specified as
-    ``<energyout>0.0 1.0 20.0</energyout>``, then two post-collision energy bins
-    will be created, one with energies between 0 and 1 MeV and the other with
-    energies between 1 and 20 MeV.
-
-  :mesh:
-    The ``id`` of a structured mesh to be tallied over.
-
-The following responses can be tallied.
-
-  :flux:
-    Total flux
-
-  :total:
-    Total reaction rate
-
-  :scatter:
-    Total scattering rate. Can also be identified with the ``scatter-0``
-    response type.
-
-  :nu-scatter:
-    Total production of neutrons due to scattering. This accounts for
-    multiplicity from (n,2n), (n,3n), and (n,4n) reactions and should be
-    slightly higher than the scattering rate.
-
-  :scatter-N:
-    Tally the N\ :sup:`th` \ scattering moment, where N is the Legendre expansion order.
-    N must be between 0 and 10. As an example, tallying the 2\ :sup:`nd` \ scattering 
-    moment would be specified as ``<scores> scatter-2 </scores>``.
+    :scatter-N:
+      Tally the N\ :sup:`th` \ scattering moment, where N is the Legendre
+      expansion order.  N must be between 0 and 10. As an example, tallying the
+      2\ :sup:`nd` \ scattering moment would be specified as ``<scores>
+      scatter-2 </scores>``.
   
-  :scatter-PN:
-    Tally all of the scattering moments from order 0 to N, where N is 
-    the Legendre expansion order.  That is, ``scatter-P1`` is equivalent
-    to requesting tallies of ``scatter-0`` and ``scatter-1``.  
-    N must be between 0 and 10. As an example, tallying up to the 2\ :sup:`nd` \
-    scattering moment would be specified as ``<scores> scatter-P2 </scores>``.
+    :scatter-PN:
+      Tally all of the scattering moments from order 0 to N, where N is the
+      Legendre expansion order.  That is, ``scatter-P1`` is equivalent to
+      requesting tallies of ``scatter-0`` and ``scatter-1``.  N must be between
+      0 and 10. As an example, tallying up to the 2\ :sup:`nd` \ scattering
+      moment would be specified as ``<scores> scatter-P2 </scores>``.
     
-  :absorption:
-    Total absorption rate. This accounts for all reactions which do not produce
-    secondary neutrons.
+    :absorption:
+      Total absorption rate. This accounts for all reactions which do not
+      produce secondary neutrons.
 
-  :fission:
-    Total fission rate
+    :fission:
+      Total fission rate
 
-  :nu-fission:
-    Total production of neutrons due to fission
+    :nu-fission:
+      Total production of neutrons due to fission
     
-  :kappa-fission:
-    The recoverable energy production rate due to fission. The recoverable
-    energy is defined as the fission product kinetic energy, prompt and delayed neutron
-    kinetic energies, prompt and delayed :math:`\gamma`-ray total energies,
-    and the total energy released by the delayed :math:`\beta` particles. The 
-    neutrino energy does not contribute to this response. The prompt and delayed 
-    :math:`\gamma`-rays are assumed to deposit their energy locally.
+    :kappa-fission:
+      The recoverable energy production rate due to fission. The recoverable
+      energy is defined as the fission product kinetic energy, prompt and
+      delayed neutron kinetic energies, prompt and delayed :math:`\gamma`-ray
+      total energies, and the total energy released by the delayed :math:`\beta`
+      particles. The neutrino energy does not contribute to this response. The
+      prompt and delayed :math:`\gamma`-rays are assumed to deposit their energy
+      locally.
 
-  :events:
-    Number of scoring events
+    :current:
+      Partial currents on the boundaries of each cell in a mesh.
+
+      .. note::
+          This score can only be used if a mesh filter has been
+          specified. Furthermore, it may not be used in conjunction with any
+          other score.
+
+    :events:
+      Number of scoring events
 
 ``<mesh>`` Element
 ------------------
@@ -859,15 +909,23 @@ attributes/sub-elements:
     The type of structured mesh. Valid options include "rectangular" and
     "hexagonal".
 
-  :lower_left:
-    The lower-left corner of the structured mesh. If only two coordinate are
-    given, it is assumed that the mesh is an x-y mesh.
-
   :dimension:
     The number of mesh cells in each direction.
 
+  :lower_left:
+    The lower-left corner of the structured mesh. If only two coordinates are
+    given, it is assumed that the mesh is an x-y mesh.
+
+  :upper_right:
+    The upper-right corner of the structured mesh. If only two coordinates are
+    given, it is assumed that the mesh is an x-y mesh.
+
   :width:
     The width of mesh cells in each direction.
+
+  .. note::
+      One of ``<upper_right>`` or ``<width>`` must be specified, but not both
+      (even if they are consistent with one another).
 
 ``<assume_separate>`` Element
 -----------------------------
@@ -876,26 +934,32 @@ In cases where the user needs to specify many different tallies each of which
 are spatially separate, this tag can be used to cut down on some of the tally
 overhead. The effect of assuming all tallies are spatially separate is that once
 one tally is scored to, the same event is assumed not to score to any other
-tallies. This element should be followed by "yes" or "no"
+tallies. This element should be followed by "true" or "false".
 
   .. warning:: If used incorrectly, the assumption that all tallies are spatially
     separate can lead to incorrect results.
 
-  *Default*: no
+  *Default*: false
 
 --------------------------------------------
 Geometry Plotting Specification -- plots.xml
 --------------------------------------------
 
-A basic 2D plotting capability is available in OpenMC by creating a plots.xml
+Basic plotting capabilities are available in OpenMC by creating a plots.xml
 file and subsequently running with the command-line flag ``-plot``. The root
-element of the plots.xml is simply ``<plots>`` and any number output figures can
-be defined with ``<plot>`` sub-elements.
+element of the plots.xml is simply ``<plots>`` and any number output plots can
+be defined with ``<plot>`` sub-elements.  Two plot types are currently
+implemented in openMC:
+
+* ``slice``  2D pixel plot along one of the major axes. Produces a PPM image file.
+* ``voxel``  3D voxel data dump. Produces a binary file containing voxel xyz position and cell or material id.
+
 
 ``<plot>`` Element
 ------------------
 
-Each plot must contain a combination of the following attributes or sub-elements:
+Each plot must contain a combination of the following attributes or
+sub-elements:
 
   :id:
     The unique ``id`` of the plot.
@@ -909,7 +973,9 @@ Each plot must contain a combination of the following attributes or sub-elements
 
   :color:
     Keyword for plot coloring.  This can only be either ``cell`` or ``mat``,
-    which colors regions by cells and materials, respectively.
+    which colors regions by cells and materials, respectively. For voxel plots,
+    this determines which id (cell or material) is associated with each
+    position.
 
     *Default*: ``cell``
 
@@ -927,60 +993,75 @@ Each plot must contain a combination of the following attributes or sub-elements
     *Default*: None - Required entry
 
   :type:
-    Keyword for type of plot to be produced.  Currently only ``slice`` plots are
-    implemented, which create 2D pixel maps saved in the PPM file format.  PPM
-    files can be displayed in most viewers (e.g. the default Gnome viewer,
-    IrfanView, etc.).
+    Keyword for type of plot to be produced. Currently only "slice" and
+    "voxel" plots are implemented. The "slice" plot type creates 2D pixel
+    maps saved in the PPM file format. PPM files can be displayed in most
+    viewers (e.g. the default Gnome viewer, IrfanView, etc.).  The "voxel"
+    plot type produces a binary datafile containing voxel grid positioning and
+    the cell or material (specified by the ``color`` tag) at the center of each
+    voxel. These datafiles can be processed into 3D SILO files using the
+    ``voxel.py`` utility provided with the OpenMC source, and subsequently
+    viewed with a 3D viewer such as VISIT or Paraview. See the
+    :ref:`devguide_voxel` for information about the datafile structure.
 
     .. note:: Since the PPM format is saved without any kind of compression,
               the resulting file sizes can be quite large.  Saving the image in
               the PNG format can often times reduce the file size by orders of
-              magnitude without any loss of image quality.
+              magnitude without any loss of image quality. Likewise,
+              high-resolution voxel files produced by OpenMC can be quite large,
+              but the equivalent SILO files will by significantly smaller.
 
     *Default*: "slice"
 
-``<plot>`` elements of ``type`` "slice" also contain the following attributes or
-sub-elements:
+``<plot>`` elements of ``type`` "slice" and "voxel" must contain the ``pixels``
+attribute or sub-element:
+
+  :pixels:
+    Specifies the number of pixes or voxels to be used along each of the basis
+    directions for "slice" and "voxel" plots, respectively. Should be two or
+    three integers separated by spaces.
+
+    .. warning:: The ``pixels`` input determines the output file size.  For the
+                 PPM format, 10 million pixels will result in a file just under
+                 30 MB in size. A 10 million voxel binary file will be around
+                 40 MB.
+
+    .. warning:: If the aspect ratio defined in ``pixels`` does not match the
+                 aspect ratio defined in ``width`` the plot may appear stretched
+                 or squeezed.
+
+    .. warning:: Geometry features along a basis direction smaller than
+                 ``width``/``pixels`` along that basis direction may not appear
+                 in the plot.
+
+    *Default*: None - Required entry for "slice" and "voxel" plots
+
+``<plot>`` elements of ``type`` "slice" can also contain the following
+attributes or sub-elements.  These are not used in "voxel" plots:
 
   :basis:
-    Keyword specifying the plane of the plot for ``slice`` type plots.  Can be
+    Keyword specifying the plane of the plot for "slice" type plots.  Can be
     one of: "xy", "xz", "yz".
 
     *Default*: "xy"
 
-  :pixels:
-    Specifies the number of pixes to be used along each of the basis directions
-    for "slice" plots. Should be two integers separated by spaces.
-
-    .. warning:: The ``pixels`` input determines the output file size.  For the PPM
-                 format, 10 million pixels will result in a file just under 30 MB in
-                 size.
-
-    .. warning:: If the aspect ratio defined in ``pixels`` does not match the aspect
-              ratio defined in ``width`` the plot may appear stretched or squeezed.
-
-    .. warning:: Geometry features along a basis direction smaller than ``width``/``pixels``
-                 along that basis direction may not appear in the plot.
-
-    *Default*: None - Required entry for "slice" plots
-
   :background:
-    Specifies the RGB color of the regions where no OpenMC cell can be found. Should
-    be three integers separated by spaces.
+    Specifies the RGB color of the regions where no OpenMC cell can be found.
+    Should be three integers separated by spaces.
 
     *Default*: 0 0 0 (white)
 
   :col_spec:
-    Any number of this optional tag may be included in each ``<plot>`` element, which can
-    override the default random colors for cells or materials.  Each ``col_spec``
-    element must contain ``id`` and ``rgb`` sub-elements.
+    Any number of this optional tag may be included in each ``<plot>`` element,
+    which can override the default random colors for cells or materials. Each
+    ``col_spec`` element must contain ``id`` and ``rgb`` sub-elements.
   
     :id:
       Specifies the cell or material unique id for the color specification.
 
     :rgb:
-      Specifies the custom color for the cell or material.  Should be 3 integers separated
-      by spaces.
+      Specifies the custom color for the cell or material. Should be 3 integers
+      separated by spaces.
 
     As an example, if your plot is colored by material and you want material 23
     to be blue, the corresponding ``col_spec`` element would look like:
@@ -993,17 +1074,18 @@ sub-elements:
 
   :mask:
     The special ``mask`` sub-element allows for the selective plotting of *only*
-    user-specified cells or materials.  Only one ``mask`` element is allowed per ``plot``
-    element, and it must contain as attributes or sub-elements a background masking color and
-    a list of cells or materials to plot:
+    user-specified cells or materials. Only one ``mask`` element is allowed per
+    ``plot`` element, and it must contain as attributes or sub-elements a
+    background masking color and a list of cells or materials to plot:
 
     :components:
-      List of unique ``id`` numbers of the cells or materials to plot.  Should be any number
-      of integers separated by spaces.
+      List of unique ``id`` numbers of the cells or materials to plot. Should be
+      any number of integers separated by spaces.
 
     :background:
-      Color to apply to all cells or materials not in the ``components`` list of cells or
-      materials to plot.  This overrides any ``col_spec`` color specifications.
+      Color to apply to all cells or materials not in the ``components`` list of
+      cells or materials to plot. This overrides any ``col_spec`` color
+      specifications.
 
     *Default*: None
 

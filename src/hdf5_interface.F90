@@ -274,12 +274,6 @@ contains
         call h5ltmake_dataset_string_f(temp_group, "type", "Y Cone", hdf5_err)
       case (SURF_CONE_Z)
         call h5ltmake_dataset_string_f(temp_group, "type", "Z Cone", hdf5_err)
-      case (SURF_BOX_X)
-      case (SURF_BOX_Y)
-      case (SURF_BOX_Z)
-      case (SURF_BOX)
-      case (SURF_GQ)
-        call h5ltmake_dataset_string_f(temp_group, "type", "General Quadratic", hdf5_err)
       end select
 
       ! Write coefficients for surface
@@ -420,13 +414,11 @@ contains
   subroutine hdf5_write_materials()
 
     integer          :: i
+    integer          :: j
     integer(HSIZE_T) :: dims(1)
-    integer(HSIZE_T) :: size_string = 12
     integer(HID_T)   :: materials_group
     integer(HID_T)   :: temp_group
-    integer(HID_T)   :: string_type
-    integer(HID_T)   :: dspace_id
-    integer(HID_T)   :: dset_id
+    integer, allocatable :: zaids(:)
     type(Material), pointer :: m => null()
 
     ! Create group for materials
@@ -448,31 +440,31 @@ contains
       call h5ltset_attribute_string_f(temp_group, "atom_density", &
            "units", "atom/barn-cm", hdf5_err)
 
-      ! Create string type of length 12
-      call h5tcopy_f(H5T_C_S1, string_type, hdf5_err)
-      call h5tset_size_f(string_type, size_string, hdf5_err)
+      ! Copy ZAID for each nuclide to temporary array
+      allocate(zaids(m % n_nuclides))
+      do j = 1, m % n_nuclides
+        zaids(j) = nuclides(m % nuclide(j)) % zaid
+      end do
 
-      ! Create dataspace and dataset for writing nuclides
+      ! Write temporary array to 'nuclides'
       dims(1) = m % n_nuclides
-      call h5screate_simple_f(1, dims, dspace_id, hdf5_err)
-      call h5dcreate_f(temp_group, "nuclides", string_type, dspace_id, &
-           dset_id, hdf5_err)
+      call h5ltmake_dataset_int_f(temp_group, "nuclides", 1, &
+           dims, zaids, hdf5_err)
 
-      ! Write list of nuclides
-      call h5dwrite_f(dset_id, string_type, m % names, dims, hdf5_err)
-
-      ! Close dataspace and dataset for nuclides
-      call h5dclose_f(dset_id, hdf5_err)
-      call h5sclose_f(dspace_id, hdf5_err)
+      ! Deallocate temporary array
+      deallocate(zaids)
 
       ! Write atom densities
       call h5ltmake_dataset_double_f(temp_group, "nuclide_densities", 1, &
            dims, m % atom_density, hdf5_err)
 
       ! Write S(a,b) information if present
-      if (m % has_sab_table) then
-        call h5ltmake_dataset_string_f(temp_group, "sab_table", &
-             m % sab_name, hdf5_err)
+      if (m % n_sab > 0) then
+        dims(1) = m % n_sab
+        call h5ltmake_dataset_int_f(temp_group, "i_sab_nuclides", 1, &
+             dims, m % i_sab_nuclides, hdf5_err)
+        call h5ltmake_dataset_int_f(temp_group, "i_sab_tables", 1, &
+             dims, m % i_sab_tables, hdf5_err)
       end if
 
       ! Close group for i-th material
@@ -507,7 +499,7 @@ contains
     ! Write information for meshes
     MESH_LOOP: do i = 1, n_meshes
       ! Create temporary group for each mesh
-      call h5gcreate_f(tallies_group, "mesh " // to_str(meshes(i) % id), &
+      call h5gcreate_f(tallies_group, "mesh" // to_str(i), &
            temp_group, hdf5_err)
 
       ! Write type and number of dimensions
@@ -538,7 +530,7 @@ contains
       t => tallies(i)
 
       ! Create group for this tally
-      call h5gcreate_f(tallies_group, "tally " // to_str(t % id), &
+      call h5gcreate_f(tallies_group, "tally" // to_str(i), &
            temp_group, hdf5_err)
 
       ! Write size of each tally
@@ -552,7 +544,7 @@ contains
 
       FILTER_LOOP: do j = 1, t % n_filters
         ! Create filter group
-        call h5gcreate_f(temp_group, "filter " // to_str(j), filter_group, &
+        call h5gcreate_f(temp_group, "filter" // to_str(j), filter_group, &
              hdf5_err)
 
         ! Write type of filter
@@ -895,6 +887,12 @@ contains
       dims(1) = current_batch*gen_per_batch
       call h5ltmake_dataset_double_f(hdf5_state_point, "entropy", 1, &
            dims, entropy, hdf5_err)
+      call hdf5_write_double(hdf5_state_point, "k_col_abs", k_col_abs)
+      call hdf5_write_double(hdf5_state_point, "k_col_tra", k_col_tra)
+      call hdf5_write_double(hdf5_state_point, "k_abs_tra", k_abs_tra)
+      dims(1) = 2
+      call h5ltmake_dataset_double_f(hdf5_state_point, "k_combined", 1, &
+           dims, k_combined, hdf5_err)
     end if
 
     ! Create group for tallies
@@ -906,7 +904,7 @@ contains
     ! Write information for meshes
     MESH_LOOP: do i = 1, n_meshes
       ! Create temporary group for each mesh
-      call h5gcreate_f(tallies_group, "mesh " // to_str(meshes(i) % id), &
+      call h5gcreate_f(tallies_group, "mesh" // to_str(i), &
            temp_group, hdf5_err)
 
       ! Write id, type, and number of dimensions
@@ -938,7 +936,7 @@ contains
       t => tallies(i)
 
       ! Create group for this tally
-      call h5gcreate_f(tallies_group, "tally " // to_str(t % id), &
+      call h5gcreate_f(tallies_group, "tally" // to_str(i), &
            temp_group, hdf5_err)
 
       ! Write id
@@ -959,7 +957,7 @@ contains
 
       FILTER_LOOP: do j = 1, t % n_filters
         ! Create filter group
-        call h5gcreate_f(temp_group, "filter " // to_str(j), filter_group, &
+        call h5gcreate_f(temp_group, "filter" // to_str(j), filter_group, &
              hdf5_err)
 
         ! Write type of filter
@@ -1079,7 +1077,7 @@ contains
         t => tallies(i)
 
         ! Open group for the i-th tally
-        call h5gopen_f(tallies_group, "tally " // to_str(t % id), &
+        call h5gopen_f(tallies_group, "tally" // to_str(i), &
              temp_group, hdf5_err)
 
         ! Write sum and sum_sq for each bin
@@ -1106,14 +1104,16 @@ contains
     ! TODO: Use parallel HDF5 to write source bank
 
     ! Write source bank
-    dims(1) = work
-    call h5screate_simple_f(1, dims, dspace, hdf5_err)
-    call h5dcreate_f(hdf5_state_point, "source_bank", hdf5_bank_t, &
-         dspace, dset, hdf5_err)
-    f_ptr = c_loc(source_bank(1))
-    CALL h5dwrite_f(dset, hdf5_bank_t, f_ptr, hdf5_err)
-    call h5dclose_f(dset, hdf5_err)
-    call h5sclose_f(dspace, hdf5_err)
+    if (source_write) then
+      dims(1) = work
+      call h5screate_simple_f(1, dims, dspace, hdf5_err)
+      call h5dcreate_f(hdf5_state_point, "source_bank", hdf5_bank_t, &
+           dspace, dset, hdf5_err)
+      f_ptr = c_loc(source_bank(1))
+      CALL h5dwrite_f(dset, hdf5_bank_t, f_ptr, hdf5_err)
+      call h5dclose_f(dset, hdf5_err)
+      call h5sclose_f(dspace, hdf5_err)
+    end if
 
     ! Write out CMFD info if active
     if (cmfd_on) then
@@ -1200,8 +1200,12 @@ contains
       dims(1) = restart_batch
       call h5ltread_dataset_double_f(hdf5_state_point, "k_batch", &
            k_batch(1:restart_batch), dims, hdf5_err)
+      dims(1) = restart_batch*gen_per_batch
       call h5ltread_dataset_double_f(hdf5_state_point, "entropy", &
            entropy(1:restart_batch*gen_per_batch), dims, hdf5_err)
+      call hdf5_read_double(hdf5_state_point, "k_col_abs", k_col_abs)
+      call hdf5_read_double(hdf5_state_point, "k_col_tra", k_col_tra)
+      call hdf5_read_double(hdf5_state_point, "k_abs_tra", k_abs_tra)
     end if
 
     ! Read number of realizations for global tallies
@@ -1220,8 +1224,8 @@ contains
 
       TALLIES_LOOP: do i = 1, n_tallies
         ! Open tally group
-        call h5gopen_f(hdf5_state_point, "tallies/tally " // &
-             to_str(tallies(i) % id), tally_group, hdf5_err)
+        call h5gopen_f(hdf5_state_point, "tallies/tally" // &
+             to_str(i), tally_group, hdf5_err)
 
         ! Read number of realizations
         call hdf5_read_integer(tally_group, "n_realizations", &

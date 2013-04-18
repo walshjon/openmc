@@ -22,10 +22,8 @@ module state_point
   use global
   use math,         only: t_percentile
   use output,       only: write_message, print_batch_keff, time_stamp
-  use source,       only: write_source_binary
   use string,       only: to_str
   use tally_header, only: TallyObject
-  use tally,        only: setup_active_usertallies
 
 #ifdef MPI
   use mpi
@@ -126,9 +124,11 @@ contains
         ! a separate file, we make a call to the appropriate subroutine to
         ! write it separately
 
-        path_source = "source." // trim(to_str(current_batch)) // ".binary"
-        call write_source_binary()
-      else
+        if (source_write) then
+          path_source = "source." // trim(to_str(current_batch)) // ".binary"
+          call write_source_binary()
+        end if
+      elseif (source_write) then
         ! Otherwise, write the source sites in the state point file
 
         ! Get current offset for master
@@ -187,6 +187,10 @@ contains
       write(UNIT_STATE) n_inactive, gen_per_batch
       write(UNIT_STATE) k_batch(1:current_batch)
       write(UNIT_STATE) entropy(1:current_batch*gen_per_batch)
+      write(UNIT_STATE) k_col_abs
+      write(UNIT_STATE) k_col_tra
+      write(UNIT_STATE) k_abs_tra
+      write(UNIT_STATE) k_combined
     end if
 
     ! Write number of meshes
@@ -298,9 +302,11 @@ contains
         ! a separate file, we make a call to the appropriate subroutine to
         ! write it separately
 
-        path_source = "source." // trim(to_str(current_batch)) // ".binary"
-        call write_source_binary()
-      else
+        if (source_write) then
+          path_source = "source." // trim(to_str(current_batch)) // ".binary"
+          call write_source_binary()
+        end if
+      elseif (source_write) then
         ! Otherwise, write the source sites in the state point file
 
         write(UNIT_STATE) source_bank
@@ -373,6 +379,14 @@ contains
       call MPI_FILE_WRITE(fh, k_batch, current_batch, MPI_REAL8, &
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, entropy, current_batch*gen_per_batch, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_WRITE(fh, k_col_abs, 1, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_WRITE(fh, k_col_tra, 1, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_WRITE(fh, k_abs_tra, 1, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_WRITE(fh, k_combined, 2, MPI_REAL8, &
            MPI_STATUS_IGNORE, mpi_err)
     end if
 
@@ -470,6 +484,7 @@ contains
            MPI_INTEGER, MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_WRITE(fh, t % scatt_order, t % n_score_bins, &
            MPI_INTEGER, MPI_STATUS_IGNORE, mpi_err)
+
       ! Write number of user score bins
       call MPI_FILE_WRITE(fh, t % n_user_score_bins, 1, MPI_INTEGER, &
            MPI_STATUS_IGNORE, mpi_err)
@@ -685,6 +700,16 @@ contains
            MPI_STATUS_IGNORE, mpi_err)
       call MPI_FILE_READ_ALL(fh, entropy, restart_batch*gen_per_batch, &
            MPI_REAL8, MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_READ_ALL(fh, k_col_abs, 1, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_READ_ALL(fh, k_col_tra, 1, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      call MPI_FILE_READ_ALL(fh, k_abs_tra, 1, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      allocate(real_array(2))
+      call MPI_FILE_READ_ALL(fh, real_array, 2, MPI_REAL8, &
+           MPI_STATUS_IGNORE, mpi_err)
+      deallocate(real_array)
     end if
 
     if (master) then
@@ -771,19 +796,15 @@ contains
              MPI_STATUS_IGNORE, mpi_err)
         deallocate(int_array)
 
-        ! Read number of results
+        ! Read number of score bins, score bins, and scatt_order
         call MPI_FILE_READ(fh, temp, 1, MPI_INTEGER, &
              MPI_STATUS_IGNORE, mpi_err)
-
-        ! Read score bins and scatt_order
         allocate(int_array(temp(1)))
         call MPI_FILE_READ(fh, int_array, temp(1), MPI_INTEGER, &
              MPI_STATUS_IGNORE, mpi_err)
         call MPI_FILE_READ(fh, int_array, temp(1), MPI_INTEGER, &
              MPI_STATUS_IGNORE, mpi_err)
         deallocate(int_array)
-        call MPI_FILE_READ(fh, temp, 1, MPI_INTEGER, &
-             MPI_STATUS_IGNORE, mpi_err)
         
         ! Read number of user score bins
         call MPI_FILE_READ(fh, temp, 1, MPI_INTEGER, &
@@ -892,6 +913,12 @@ contains
       read(UNIT_STATE) n_inactive, gen_per_batch
       read(UNIT_STATE) k_batch(1:restart_batch)
       read(UNIT_STATE) entropy(1:restart_batch*gen_per_batch)
+      read(UNIT_STATE) k_col_abs
+      read(UNIT_STATE) k_col_tra
+      read(UNIT_STATE) k_abs_tra
+      allocate(real_array(2))
+      read(UNIT_STATE) real_array
+      deallocate(real_array)
     end if
 
     if (master) then
@@ -1083,5 +1110,176 @@ contains
     end if
 
   end subroutine replay_batch_history
+
+!===============================================================================
+! WRITE_SOURCE writes out the final source distribution to a binary file that
+! can be used as a starting source in a new simulation
+!===============================================================================
+
+  subroutine write_source_binary()
+
+#ifdef MPI
+    integer                  :: fh     ! file handle
+    integer(MPI_OFFSET_KIND) :: offset ! offset in memory (0=beginning of file)
+
+    ! ==========================================================================
+    ! PARALLEL I/O USING MPI-2 ROUTINES
+
+    ! Open binary source file for reading
+    call MPI_FILE_OPEN(MPI_COMM_WORLD, path_source, MPI_MODE_CREATE + &
+         MPI_MODE_WRONLY, MPI_INFO_NULL, fh, mpi_err)
+
+    if (master) then
+      offset = 0
+      call MPI_FILE_WRITE_AT(fh, offset, n_particles, 1, MPI_INTEGER8, &
+           MPI_STATUS_IGNORE, mpi_err)
+    end if
+
+    ! Set proper offset for source data on this processor
+    offset = 8*(1 + rank*maxwork*8)
+
+    ! Write all source sites
+    call MPI_FILE_WRITE_AT(fh, offset, source_bank(1), work, MPI_BANK, &
+         MPI_STATUS_IGNORE, mpi_err)
+
+    ! Close binary source file
+    call MPI_FILE_CLOSE(fh, mpi_err)
+
+#else
+    ! ==========================================================================
+    ! SERIAL I/O USING FORTRAN INTRINSIC ROUTINES
+
+    ! Open binary source file for writing
+    open(UNIT=UNIT_SOURCE, FILE=path_source, STATUS='replace', &
+         ACCESS='stream')
+
+    ! Write the number of particles
+    write(UNIT=UNIT_SOURCE) n_particles
+
+    ! Write information from the source bank
+    write(UNIT=UNIT_SOURCE) source_bank(1:work)
+
+    ! Close binary source file
+    close(UNIT=UNIT_SOURCE)
+#endif
+
+  end subroutine write_source_binary
+
+!===============================================================================
+! READ_SOURCE_BINARY reads a source distribution from a source.binary file and
+! initializes the source bank
+!===============================================================================
+
+  subroutine read_source_binary()
+
+    integer    :: i        ! loop over repeating sites
+    integer(8) :: n_sites  ! number of sites in binary file
+    integer    :: n_repeat ! number of times to repeat a site
+#ifdef MPI
+    integer    :: fh       ! file handle
+    integer(MPI_OFFSET_KIND) :: offset ! offset in memory (0=beginning of file)
+    integer    :: n_read   ! number of sites to read on a single process
+#endif
+
+#ifdef MPI
+    ! ==========================================================================
+    ! PARALLEL I/O USING MPI-2 ROUTINES
+
+    ! Open binary source file for reading
+    call MPI_FILE_OPEN(MPI_COMM_WORLD, path_source, MPI_MODE_RDONLY, &
+         MPI_INFO_NULL, fh, mpi_err)
+
+    ! Read number of source sites in file
+    offset = 0
+    call MPI_FILE_READ_AT(fh, offset, n_sites, 1, MPI_INTEGER8, &
+         MPI_STATUS_IGNORE, mpi_err)
+
+    if (n_particles > n_sites) then
+      ! Determine number of sites to read and offset
+      if (rank <= mod(n_sites,int(n_procs,8)) - 1) then
+        n_read = int(n_sites/n_procs) + 1
+        offset = 8*(1 + rank*n_read*8)
+      else
+        n_read = int(n_sites/n_procs)
+        offset = 8*(1 + (rank*n_read + mod(n_sites,int(n_procs,8)))*8)
+      end if
+
+      ! Read source sites
+      call MPI_FILE_READ_AT(fh, offset, source_bank(1), n_read, MPI_BANK, &
+           MPI_STATUS_IGNORE, mpi_err)
+
+      ! Let's say we have 30 sites and we need to fill in 200. This do loop
+      ! will fill in sites 31 - 180.
+
+      n_repeat = int(work / n_read)
+      do i = 1, n_repeat - 1
+        source_bank(i*n_read + 1:(i+1)*n_read) = &
+             source_bank((i-1)*n_read + 1:i*n_read)
+      end do
+
+      ! This final statement would fill sites 181 - 200 in the above example.
+
+      if (mod(work, int(n_repeat*n_read,8)) > 0) then
+        source_bank(n_repeat*n_read + 1:work) = &
+             source_bank(1:work - n_repeat * n_read)
+      end if
+
+    else
+      ! Set proper offset for source data on this processor
+      offset = 8*(1 + rank*maxwork*8)
+
+      ! Read all source sites
+      call MPI_FILE_READ_AT(fh, offset, source_bank(1), work, MPI_BANK, &
+           MPI_STATUS_IGNORE, mpi_err)
+
+      ! Close binary source file
+      call MPI_FILE_CLOSE(fh, mpi_err)
+    end if
+
+#else
+    ! ==========================================================================
+    ! SERIAL I/O USING FORTRAN INTRINSIC ROUTINES
+
+    ! Open binary source file for reading
+    open(UNIT=UNIT_SOURCE, FILE=path_source, STATUS='old', &
+         ACCESS='stream')
+
+    ! Read number of source sites in file
+    read(UNIT=UNIT_SOURCE) n_sites
+
+    if (n_particles > n_sites) then
+      ! The size of the source file is smaller than the number of particles we
+      ! need. Thus, read all sites and then duplicate sites as necessary.
+
+      read(UNIT=UNIT_SOURCE) source_bank(1:n_sites)
+
+      ! Let's say we have 300 sites and we need to fill in 1000. This do loop
+      ! will fill in sites 301 - 900.
+
+      n_repeat = int(n_particles / n_sites)
+      do i = 1, n_repeat - 1
+        source_bank(i*n_sites + 1:(i+1)*n_sites) = &
+             source_bank((i-1)*n_sites + 1:i*n_sites)
+      end do
+
+      ! This final statement would fill sites 901 - 1000 in the above example.
+
+      source_bank(n_repeat*n_sites + 1:n_particles) = &
+           source_bank(1:n_particles - n_repeat * n_sites)
+
+    else
+      ! The size of the source file is bigger than or equal to the number of
+      ! particles we need for one generation. Thus, we can just read as many
+      ! sites as we need.
+
+      read(UNIT=UNIT_SOURCE) source_bank(1:n_particles)
+
+    end if
+
+    ! Close binary source file
+    close(UNIT=UNIT_SOURCE)
+#endif
+
+  end subroutine read_source_binary
 
 end module state_point

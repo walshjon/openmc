@@ -4,7 +4,7 @@ module finalize
   use cmfd_output,    only: finalize_cmfd
 # endif
   use global
-  use output,         only: print_runtime, write_tallies
+  use output,         only: print_runtime, print_results, write_tallies
   use tally,          only: tally_statistics
 
 #ifdef MPI
@@ -29,7 +29,7 @@ contains
     ! Start finalization timer
     call time_finalize % start()
 
-    if (run_mode /= MODE_PLOTTING) then
+    if (run_mode /= MODE_PLOTTING .and. run_mode /= MODE_PARTICLE) then
       ! Calculate statistics for tallies and write to tallies.out
       if (master) call tally_statistics()
       if (output_tallies) then
@@ -46,7 +46,11 @@ contains
     call time_finalize % stop()
     call time_total % stop()
     if (master .and. (run_mode /= MODE_PLOTTING .and. &
-         run_mode /= MODE_TALLIES)) call print_runtime()
+         run_mode /= MODE_TALLIES .and. &
+         run_mode /= MODE_PARTICLE)) then
+      call print_runtime()
+      call print_results()
+    end if
 
     ! deallocate arrays
     call free_memory()

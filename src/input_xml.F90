@@ -6,6 +6,7 @@ module input_xml
   use error,            only: fatal_error, warning
   use geometry_header,  only: Cell, Surface, Lattice
   use global
+  use list_header,      only: ListChar, ListReal
   use mesh_header,      only: StructuredMesh
   use output,           only: write_message
   use plot_header
@@ -16,6 +17,7 @@ module input_xml
   use tally_initialize, only: add_tallies
 
   implicit none
+  save
 
   type(DictIntInt) :: cells_in_univ_dict ! used to count how many cells each
                                          ! universe contains
@@ -30,7 +32,7 @@ contains
   subroutine read_input_xml()
 
     call read_settings_xml()
-    call read_cross_sections_xml()
+    if ((run_mode /= MODE_PLOTTING)) call read_cross_sections_xml()
     call read_geometry_xml()
     call read_materials_xml()
     call read_tallies_xml()
@@ -84,7 +86,7 @@ contains
     ! settings.xml file. If no file is found there, then we check the
     ! CROSS_SECTIONS environment variable
 
-    if (len_trim(cross_sections_) == 0) then
+    if (len_trim(cross_sections_) == 0 .and. run_mode /= MODE_PLOTTING) then
       ! No cross_sections.xml file specified in settings.xml, check environment
       ! variable
       call get_environment_variable("CROSS_SECTIONS", env_variable)
@@ -487,32 +489,34 @@ contains
 
       if (n_state_points > 0) then
         ! User gave specific batches to write state points
-        allocate(statepoint_batch(n_state_points))
-        statepoint_batch = state_point_(1) % batches
+        do i = 1, n_state_points
+          call statepoint_batch % add(state_point_(1) % batches(i))
+        end do
 
       elseif (state_point_(1) % interval /= 0) then
         ! User gave an interval for writing state points
         n_state_points = n_batches / state_point_(1) % interval
-        allocate(statepoint_batch(n_state_points))
-        statepoint_batch = (/ (state_point_(1) % interval * i, i = 1, &
-             n_state_points) /)
+        do i = 1, n_state_points
+          call statepoint_batch % add(state_point_(1) % interval * i)
+        end do
       else
         ! If neither were specified, write state point at last batch
         n_state_points = 1
-        allocate(statepoint_batch(n_state_points))
-        statepoint_batch(1) = n_batches
+        call statepoint_batch % add(n_batches)
       end if
 
       ! Check if the user has specified to write binary source file
       call lower_case(state_point_(1) % source_separate)
+      call lower_case(state_point_(1) % source_write)
       if (state_point_(1) % source_separate == 'true' .or. &
            state_point_(1) % source_separate == '1') source_separate = .true.
+      if (state_point_(1) % source_write == 'false' .or. &
+           state_point_(1) % source_write == '0') source_write = .false.
     else
       ! If no <state_point> tag was present, by default write state point at
       ! last batch only
       n_state_points = 1
-      allocate(statepoint_batch(n_state_points))
-      statepoint_batch(1) = n_batches
+      call statepoint_batch % add(n_batches)
     end if
 
     ! Check if the user has specified to not reduce tallies at the end of every
@@ -576,6 +580,7 @@ contains
     integer :: coeffs_reqd
     real(8) :: phi, theta, psi
     logical :: file_exists
+    logical :: boundary_exists
     character(MAX_LINE_LEN) :: filename
     character(MAX_WORD_LEN) :: word
     type(Cell),    pointer :: c => null()
@@ -620,6 +625,12 @@ contains
       c % id       = cell_(i) % id
       c % universe = cell_(i) % universe
       c % fill     = cell_(i) % fill
+
+      ! Check to make sure 'id' hasn't been used
+      if (cell_dict % has_key(c % id)) then
+        message = "Two or more cells use the same unique ID: " // to_str(c % id)
+        call fatal_error()
+      end if
 
       ! Read material
       word = cell_(i) % material
@@ -748,6 +759,10 @@ contains
     ! ==========================================================================
     ! READ SURFACES FROM GEOMETRY.XML
 
+    ! This variable is used to check whether at least one boundary condition was
+    ! applied to a surface
+    boundary_exists = .false.
+
     ! Get number of <surface> tags
     n_surfaces = size(surface_)
 
@@ -765,6 +780,13 @@ contains
 
       ! Copy data into cells
       s % id = surface_(i) % id
+
+      ! Check to make sure 'id' hasn't been used
+      if (surface_dict % has_key(s % id)) then
+        message = "Two or more surfaces use the same unique ID: " // &
+             to_str(s % id)
+        call fatal_error()
+      end if
 
       ! Copy and interpret surface type
       word = surface_(i) % type
@@ -803,21 +825,6 @@ contains
       case ('z-cone')
         s % type = SURF_CONE_Z
         coeffs_reqd  = 4
-      case ('box-x')
-        s % type = SURF_BOX_X
-        coeffs_reqd  = 4
-      case ('box-y')
-        s % type = SURF_BOX_Y
-        coeffs_reqd  = 4
-      case ('box-z')
-        s % type = SURF_BOX_Z
-        coeffs_reqd  = 4
-      case ('box') 
-        s % type = SURF_BOX
-        coeffs_reqd  = 6
-      case ('quadratic')
-        s % type = SURF_GQ
-        coeffs_reqd  = 10
       case default
         message = "Invalid surface type: " // trim(surface_(i) % type)
         call fatal_error()
@@ -849,10 +856,10 @@ contains
         s % bc = BC_TRANSMIT
       case ('vacuum')
         s % bc = BC_VACUUM
+        boundary_exists = .true.
       case ('reflective', 'reflect', 'reflecting')
         s % bc = BC_REFLECT
-      case ('periodic')
-        s % bc = BC_PERIODIC
+        boundary_exists = .true.
       case default
         message = "Unknown boundary condition '" // trim(word) // &
              "' specified on surface " // trim(to_str(s % id))
@@ -863,6 +870,13 @@ contains
       call surface_dict % add_key(s % id, i)
 
     end do
+
+    ! Check to make sure a boundary condition was applied to at least one
+    ! surface
+    if (.not. boundary_exists) then
+      message = "No boundary conditions were applied to any surfaces!"
+      call fatal_error()
+    end if
 
     ! ==========================================================================
     ! READ LATTICES FROM GEOMETRY.XML
@@ -876,6 +890,13 @@ contains
 
       ! ID of lattice
       lat % id = lattice_(i) % id
+
+      ! Check to make sure 'id' hasn't been used
+      if (lattice_dict % has_key(lat % id)) then
+        message = "Two or more lattices use the same unique ID: " // &
+             to_str(lat % id)
+        call fatal_error()
+      end if
 
       ! Read lattice type
       word = lattice_(i) % type
@@ -967,16 +988,19 @@ contains
     integer :: i             ! loop index for materials
     integer :: j             ! loop index for nuclides
     integer :: n             ! number of nuclides
+    integer :: n_sab         ! number of sab tables for a material
     integer :: index_list    ! index in xs_listings array
     integer :: index_nuclide ! index in nuclides
     integer :: index_sab     ! index in sab_tables
     real(8) :: val           ! value entered for density
     logical :: file_exists   ! does materials.xml exist?
     logical :: sum_density   ! density is taken to be sum of nuclide densities
-    character(12) :: name       ! name of isotope, e.g. 92235.03c
-    character(12) :: alias      ! alias of nuclide, e.g. U-235.03c
+    character(12) :: name    ! name of isotope, e.g. 92235.03c
+    character(12) :: alias   ! alias of nuclide, e.g. U-235.03c
     character(MAX_WORD_LEN) :: units    ! units on density
     character(MAX_LINE_LEN) :: filename ! absolute path to materials.xml
+    type(ListChar) :: list_names   ! temporary list of nuclide names
+    type(ListReal) :: list_density ! temporary list of nuclide densities
     type(Material),    pointer :: mat => null()
     type(nuclide_xml), pointer :: nuc => null()
     type(sab_xml),     pointer :: sab => null()
@@ -1015,6 +1039,19 @@ contains
 
       ! Copy material id
       mat % id = material_(i) % id
+
+      ! Check to make sure 'id' hasn't been used
+      if (material_dict % has_key(mat % id)) then
+        message = "Two or more materials use the same unique ID: " // &
+             to_str(mat % id)
+        call fatal_error()
+      end if
+
+      if (run_mode == MODE_PLOTTING) then
+        ! add to the dictionary and skip xs processing
+        call material_dict % add_key(mat % id, i)
+        cycle
+      end if
 
       ! =======================================================================
       ! READ AND PARSE <density> TAG
@@ -1061,20 +1098,15 @@ contains
       ! READ AND PARSE <nuclide> TAGS
 
       ! Check to ensure material has at least one nuclide
-      if (.not. associated(material_(i) % nuclides)) then
-        message = "No nuclides specified on material " // &
+      if (.not. associated(material_(i) % nuclides) .and. &
+           .not. associated(material_(i) % elements)) then
+        message = "No nuclides or natural elements specified on material " // &
              trim(to_str(mat % id))
         call fatal_error()
       end if
 
-      ! allocate arrays in Material object
-      n = size(material_(i) % nuclides)
-      mat % n_nuclides = n
-      allocate(mat % names(n))
-      allocate(mat % nuclide(n))
-      allocate(mat % atom_density(n))
-
-      do j = 1, mat % n_nuclides
+      ! Create list of nuclides based on those specified plus natural elements
+      INDIVIDUAL_NUCLIDES: do j = 1, size(material_(i) % nuclides)
         ! Combine nuclide identifier and cross section and copy into names
         nuc => material_(i) % nuclides(j)
 
@@ -1096,11 +1128,92 @@ contains
           end if
         end if
 
-        ! copy full name
+        ! store full name
         name = trim(nuc % name) // "." // trim(nuc % xs)
-        mat % names(j) = name
 
+        ! save name and density to list
+        call list_names % append(name)
+
+        ! Check if no atom/weight percents were specified or if both atom and
+        ! weight percents were specified
+        if (nuc % ao == ZERO .and. nuc % wo == ZERO) then
+          message = "No atom or weight percent specified for nuclide " // &
+               trim(name)
+          call fatal_error()
+        elseif (nuc % ao /= ZERO .and. nuc % wo /= ZERO) then
+          message = "Cannot specify both atom and weight percents for a &
+               &nuclide: " // trim(name)
+          call fatal_error()
+        end if
+
+        ! Copy atom/weight percents
+        if (nuc % ao /= ZERO) then
+          call list_density % append(nuc % ao)
+        else
+          call list_density % append(-nuc % wo)
+        end if
+      end do INDIVIDUAL_NUCLIDES
+
+      ! =======================================================================
+      ! READ AND PARSE <element> TAGS
+
+      NATURAL_ELEMENTS: do j = 1, size(material_(i) % elements)
+        nuc => material_(i) % elements(j)
+
+        ! Check for empty name on natural element
+        if (len_trim(nuc % name) == 0) then
+          message = "No name specified on nuclide in material " // &
+               trim(to_str(mat % id))
+          call fatal_error()
+        end if
+
+        ! Check for cross section
+        if (len_trim(nuc % xs) == 0) then
+          if (default_xs == '') then
+            message = "No cross section specified for nuclide in material " &
+                 // trim(to_str(mat % id))
+            call fatal_error()
+          else
+            nuc % xs = default_xs
+          end if
+        end if
+
+        ! Check if no atom/weight percents were specified or if both atom and
+        ! weight percents were specified
+        if (nuc % ao == ZERO .and. nuc % wo == ZERO) then
+          message = "No atom or weight percent specified for nuclide " // &
+               trim(name)
+          call fatal_error()
+        elseif (nuc % ao /= ZERO .and. nuc % wo /= ZERO) then
+          message = "Cannot specify both atom and weight percents for a &
+               &nuclide: " // trim(name)
+          call fatal_error()
+        end if
+
+        ! Expand element into naturally-occurring isotopes
+        if (nuc % ao /= ZERO) then
+          call expand_natural_element(nuc % name, nuc % xs, nuc % ao, &
+               list_names, list_density)
+        else
+          message = "The ability to expand a natural element based on weight &
+               &percentage is not yet supported."
+          call fatal_error()
+        end if
+      end do NATURAL_ELEMENTS
+
+      ! ========================================================================
+      ! COPY NUCLIDES TO ARRAYS IN MATERIAL
+
+      ! allocate arrays in Material object
+      n = list_names % size()
+      mat % n_nuclides = n
+      allocate(mat % names(n))
+      allocate(mat % nuclide(n))
+      allocate(mat % atom_density(n))
+
+      ALL_NUCLIDES: do j = 1, mat % n_nuclides
         ! Check that this nuclide is listed in the cross_sections.xml file
+        name = list_names % get_item(j)
         if (.not. xs_listing_dict % has_key(name)) then
           message = "Could not find nuclide " // trim(name) // &
                " in cross_sections.xml file!"
@@ -1132,25 +1245,10 @@ contains
           mat % nuclide(j) = nuclide_dict % get_key(name)
         end if
 
-        ! Check if no atom/weight percents were specified or if both atom and
-        ! weight percents were specified
-        if (nuc % ao == ZERO .and. nuc % wo == ZERO) then
-          message = "No atom or weight percent specified for nuclide " // &
-               trim(name)
-          call fatal_error()
-        elseif (nuc % ao /= ZERO .and. nuc % wo /= ZERO) then
-          message = "Cannot specify both atom and weight percents for a &
-               &nuclide: " // trim(name)
-          call fatal_error()
-        end if
-
-        ! Copy atom/weight percents
-        if (nuc % ao /= ZERO) then
-          mat % atom_density(j) = nuc % ao
-        else
-          mat % atom_density(j) = -nuc % wo
-        end if
-      end do
+        ! Copy name and atom/weight percent
+        mat % names(j) = name
+        mat % atom_density(j) = list_density % get_item(j)
+      end do ALL_NUCLIDES
 
       ! Check to make sure either all atom percents or all weight percents are
       ! given
@@ -1164,46 +1262,59 @@ contains
       ! Determine density if it is a sum value
       if (sum_density) mat % density = sum(mat % atom_density)
 
+      ! Clear lists
+      call list_names % clear()
+      call list_density % clear()
+
       ! =======================================================================
       ! READ AND PARSE <sab> TAG FOR S(a,b) DATA
 
-      if (size(material_(i) % sab) == 1) then
-        ! Get pointer to S(a,b) table
-        sab => material_(i) % sab(1)
+      n_sab = size(material_(i) % sab)
+      if (n_sab > 0) then
+        ! Set number of S(a,b) tables
+        mat % n_sab = n_sab
 
-        ! Determine name of S(a,b) table
-        name = trim(sab % name) // "." // trim(sab % xs)
-        mat % sab_name = name
+        ! Allocate names and indices for nuclides and tables
+        allocate(mat % sab_names(n_sab))
+        allocate(mat % i_sab_nuclides(n_sab))
+        allocate(mat % i_sab_tables(n_sab))
 
-        ! Check that this nuclide is listed in the cross_sections.xml file
-        if (.not. xs_listing_dict % has_key(name)) then
-          message = "Could not find S(a,b) table " // trim(name) // &
-               " in cross_sections.xml file!"
-          call fatal_error()
-        end if
-        mat % has_sab_table = .true.
+        ! Initialize i_sab_nuclides
+        mat % i_sab_nuclides = NONE
 
-        ! Find index in xs_listing and set the name and alias according to the
-        ! listing
-        index_list = xs_listing_dict % get_key(name)
-        name       = xs_listings(index_list) % name
-        alias      = xs_listings(index_list) % alias
+        do j = 1, n_sab
+          ! Get pointer to S(a,b) table
+          sab => material_(i) % sab(j)
 
-        ! If this S(a,b) table hasn't been encountered yet, we need to add its
-        ! name and alias to the sab_dict
-        if (.not. sab_dict % has_key(name)) then
-          index_sab       = index_sab + 1
-          mat % sab_table = index_sab
+          ! Determine name of S(a,b) table
+          name = trim(sab % name) // "." // trim(sab % xs)
+          mat % sab_names(j) = name
 
-          call sab_dict % add_key(name, index_sab)
-          call sab_dict % add_key(alias, index_sab)
-        else
-          mat % sab_table = sab_dict % get_key(name)
-        end if
+          ! Check that this nuclide is listed in the cross_sections.xml file
+          if (.not. xs_listing_dict % has_key(name)) then
+            message = "Could not find S(a,b) table " // trim(name) // &
+                 " in cross_sections.xml file!"
+            call fatal_error()
+          end if
 
-      elseif (size(material_(i) % sab) > 1) then
-        message = "Cannot have multiple S(a,b) tables on a single material."
-        call fatal_error()
+          ! Find index in xs_listing and set the name and alias according to the
+          ! listing
+          index_list = xs_listing_dict % get_key(name)
+          name       = xs_listings(index_list) % name
+          alias      = xs_listings(index_list) % alias
+
+          ! If this S(a,b) table hasn't been encountered yet, we need to add its
+          ! name and alias to the sab_dict
+          if (.not. sab_dict % has_key(name)) then
+            index_sab           = index_sab + 1
+            mat % i_sab_tables(j) = index_sab
+
+            call sab_dict % add_key(name, index_sab)
+            call sab_dict % add_key(alias, index_sab)
+          else
+            mat % i_sab_tables(j) = sab_dict % get_key(name)
+          end if
+        end do
       end if
 
       ! Add material to dictionary
@@ -1296,7 +1407,8 @@ contains
     end if
 
     ! Check for <assume_separate> setting
-    if (separate_ == 'yes') assume_separate = .true.
+    call lower_case(separate_)
+    if (separate_ == 'true' .or. separate_ == '1') assume_separate = .true.
 
     ! ==========================================================================
     ! READ MESH DATA
@@ -1306,6 +1418,13 @@ contains
 
       ! copy mesh id
       m % id = mesh_(i) % id
+
+      ! Check to make sure 'id' hasn't been used
+      if (mesh_dict % has_key(m % id)) then
+        message = "Two or more meshes use the same unique ID: " // &
+             to_str(m % id)
+        call fatal_error()
+      end if
 
       ! Read mesh type
       call lower_case(mesh_(i) % type)
@@ -1436,6 +1555,13 @@ contains
       ! Copy material id
       t % id = tally_(i) % id
 
+      ! Check to make sure 'id' hasn't been used
+      if (tally_dict % has_key(t % id)) then
+        message = "Two or more tallies use the same unique ID: " // &
+             to_str(t % id)
+        call fatal_error()
+      end if
+
       ! Copy tally label
       t % label = tally_(i) % label
 
@@ -1526,6 +1652,9 @@ contains
             end do
 
           case ('surface')
+            message = "Surface filter is not yet supported!"
+            call fatal_error()
+
             ! Set type of filter
             t % filters(j) % type = FILTER_SURFACE
 
@@ -1599,6 +1728,13 @@ contains
                    tally_(i) % filter(j) % bins(k))
             end do
 
+          case default
+            ! Specified tally filter is invalid, raise error
+            message = "Unknown filter type '" // trim(tally_(i) % &
+                 filter(j) % type) // "' on tally " // &
+                 trim(to_str(t % id)) // "."
+            call fatal_error()
+
           end select
 
           ! Set find_filter, e.g. if filter(3) has type FILTER_CELL, then
@@ -1660,7 +1796,7 @@ contains
                 do while (associated(pair_list))
                   if (starts_with(pair_list % key, &
                        tally_(i) % nuclides(j))) then
-                    word = pair_list % key
+                    word = pair_list % key(1:150)
                     exit
                   end if
                   
@@ -1927,7 +2063,7 @@ contains
 
           case default
             ! Assume that user has specified an MT number
-            MT = str_to_int(score_name)
+            MT = int(str_to_int(score_name))
 
             if (MT /= ERROR_INT) then
               ! Specified score was an integer
@@ -1984,6 +2120,9 @@ contains
         end select
       end if
 
+      ! Add tally to dictionary
+      call tally_dict % add_key(t % id, i)
+
     end do READ_TALLIES
 
   end subroutine read_tallies_xml
@@ -2000,7 +2139,7 @@ contains
     integer n_cols, col_id
     logical :: file_exists              ! does plots.xml file exist?
     character(MAX_LINE_LEN) :: filename ! absolute path to plots.xml
-    type(Plot),         pointer :: pl => null()
+    type(ObjectPlot), pointer :: pl => null()
 
     ! Check if plots.xml exists
     filename = trim(path_input) // "plots.xml"
@@ -2021,26 +2160,68 @@ contains
     n_plots = size(plot_)
     allocate(plots(n_plots))
 
-    do i = 1, n_plots
+    READ_PLOTS: do i = 1, n_plots
       pl => plots(i)
 
       ! Copy data into plots
-      pl % id       = plot_(i) % id
+      pl % id = plot_(i) % id
+
+      ! Check to make sure 'id' hasn't been used
+      if (plot_dict % has_key(pl % id)) then
+        message = "Two or more plots use the same unique ID: " // &
+             to_str(pl % id)
+        call fatal_error()
+      end if
+
+      ! Copy plot type
+      select case (plot_(i) % type)
+      case ("slice")
+        pl % type = PLOT_TYPE_SLICE
+      case ("voxel")
+        pl % type = PLOT_TYPE_VOXEL
+      case default
+        message = "Unsupported plot type '" // trim(plot_(i) % type) &
+             // "' in plot " // trim(to_str(pl % id))
+        call fatal_error()
+      end select
 
       ! Set output file path
-      pl % path_plot = trim(path_input) // trim(to_str(pl % id)) // &
-           "_" // trim(plot_(i) % filename) // ".ppm"
-
+      select case (pl % type)
+      case (PLOT_TYPE_SLICE)
+        pl % path_plot = trim(path_input) // trim(to_str(pl % id)) // &
+             "_" // trim(plot_(i) % filename) // ".ppm"
+      case (PLOT_TYPE_VOXEL)
+        pl % path_plot = trim(path_input) // trim(to_str(pl % id)) // &
+             "_" // trim(plot_(i) % filename) // ".voxel"
+      end select
+      
       ! Copy plot pixel size
-      if (size(plot_(i) % pixels) == 2) then
-        pl % pixels = plot_(i) % pixels
-      else
-        message = "<pixels> must be length 2 in plot " // to_str(pl % id)
-        call fatal_error()
+      if (pl % type == PLOT_TYPE_SLICE) then
+        if (size(plot_(i) % pixels) == 2) then
+          pl % pixels(1) = plot_(i) % pixels(1)
+          pl % pixels(2) = plot_(i) % pixels(2)
+        else
+          message = "<pixels> must be length 2 in slice plot " // &
+                    trim(to_str(pl % id))
+          call fatal_error()
+        end if
+      else if (pl % type == PLOT_TYPE_VOXEL) then
+        if (size(plot_(i) % pixels) == 3) then
+          pl % pixels = plot_(i) % pixels
+        else
+          message = "<pixels> must be length 3 in voxel plot " // &
+                    trim(to_str(pl % id))
+          call fatal_error()
+        end if
       end if
 
       ! Copy plot background color
       if (associated(plot_(i) % background)) then
+        if (pl % type == PLOT_TYPE_VOXEL) then
+          message = "Background color ignored in voxel plot " // & 
+                     trim(to_str(pl % id))
+          call warning()
+        end if
         if (size(plot_(i) % background) == 3) then
           pl % not_found % rgb = plot_(i) % background
         else
@@ -2051,33 +2232,23 @@ contains
       else
         pl % not_found % rgb = (/ 255, 255, 255 /)
       end if
-
-      ! Copy plot type
-      select case (plot_(i) % type)
-      case ("slice")
-        pl % type = PLOT_TYPE_SLICE
-        !case ("points")
-        !  pl % type = PLOT_TYPE_POINTS
-      case default
-        message = "Unsupported plot type '" // plot_(i) % type &
-             // "' in plot " // trim(to_str(pl % id))
-        call fatal_error()
-      end select
-
+      
       ! Copy plot basis
-      select case (plot_(i) % basis)
-      case ("xy")
-        pl % basis = PLOT_BASIS_XY
-      case ("xz")
-        pl % basis = PLOT_BASIS_XZ
-      case ("yz")
-        pl % basis = PLOT_BASIS_YZ
-      case default
-        message = "Unsupported plot basis '" // plot_(i) % basis &
-             // "' in plot " // trim(to_str(pl % id))
-        call fatal_error()
-      end select
-
+      if (pl % type == PLOT_TYPE_SLICE) then
+        select case (plot_(i) % basis)
+        case ("xy")
+          pl % basis = PLOT_BASIS_XY
+        case ("xz")
+          pl % basis = PLOT_BASIS_XZ
+        case ("yz")
+          pl % basis = PLOT_BASIS_YZ
+        case default
+          message = "Unsupported plot basis '" // plot_(i) % basis &
+               // "' in plot " // trim(to_str(pl % id))
+          call fatal_error()
+        end select
+      end if
+      
       ! Copy plotting origin
       if (size(plot_(i) % origin) == 3) then
         pl % origin = plot_(i) % origin
@@ -2088,15 +2259,23 @@ contains
       end if
 
       ! Copy plotting width
-      if (size(plot_(i) % width) == 3) then
-        pl % width = plot_(i) % width
-      else if (size(plot_(i) % width) == 2) then
-        pl % width(1) = plot_(i) % width(1)
-        pl % width(2) = plot_(i) % width(2)
-      else
-        message = "Bad plot width " &
-             // "in plot " // trim(to_str(pl % id))
-        call fatal_error()
+      if (pl % type == PLOT_TYPE_SLICE) then
+        if (size(plot_(i) % width) == 2) then
+          pl % width(1) = plot_(i) % width(1)
+          pl % width(2) = plot_(i) % width(2)
+        else
+          message = "<width> must be length 2 in slice plot " // &
+                    trim(to_str(pl % id))
+          call fatal_error()
+        end if
+      else if (pl % type == PLOT_TYPE_VOXEL) then
+        if (size(plot_(i) % width) == 3) then
+          pl % width = plot_(i) % width
+        else
+          message = "<width> must be length 3 in voxel plot " // &
+                    trim(to_str(pl % id))
+          call fatal_error()
+        end if
       end if
 
       ! Copy plot color type and initialize all colors randomly
@@ -2129,6 +2308,13 @@ contains
 
       ! Copy user specified colors
       if (associated(plot_(i) % col_spec_)) then
+      
+        if (pl % type == PLOT_TYPE_VOXEL) then
+          message = "Color specifications ignored in voxel plot " // & 
+                     trim(to_str(pl % id))
+          call warning()
+        end if
+      
         n_cols = size(plot_(i) % col_spec_)
         do j = 1, n_cols
           if (size(plot_(i) % col_spec_(j) % rgb) /= 3) then
@@ -2142,6 +2328,7 @@ contains
           if (pl % color_by == PLOT_COLOR_CELLS) then
 
             if (cell_dict % has_key(col_id)) then
+              col_id = cell_dict % get_key(col_id)
               pl % colors(col_id) % rgb = plot_(i) % col_spec_(j) % rgb
             else
               message = "Could not find cell " // trim(to_str(col_id)) // &
@@ -2152,6 +2339,7 @@ contains
           else if (pl % color_by == PLOT_COLOR_MATS) then
 
             if (material_dict % has_key(col_id)) then
+              col_id = material_dict % get_key(col_id)
               pl % colors(col_id) % rgb = plot_(i) % col_spec_(j) % rgb
             else
               message = "Could not find material " // trim(to_str(col_id)) // &
@@ -2163,22 +2351,66 @@ contains
         end do
       end if
 
-      ! Alter colors based on mask information
+      ! Deal with masks
       if (associated(plot_(i) % mask_)) then
-        if (size(plot_(i) % mask_) > 1) then
-          message = "Mutliple masks" // &
-               " specified in plot " // trim(to_str(pl % id))
-          call fatal_error()
-        else if (.not. size(plot_(i) % mask_) == 0) then
-          do j=1,size(pl % colors)
-            if (.not. any(j .eq. plot_(i) % mask_(1) % components)) then
-              pl % colors(j) % rgb = plot_(i) % mask_(1) % background
-            end if
-          end do
+      
+        if (pl % type == PLOT_TYPE_VOXEL) then
+          message = "Mask ignored in voxel plot " // & 
+                     trim(to_str(pl % id))
+          call warning()
         end if
+      
+        select case(size(plot_(i) % mask_))
+          case default
+            message = "Mutliple masks" // &
+                 " specified in plot " // trim(to_str(pl % id))
+            call fatal_error()
+          case (0)
+          case (1)
+          
+            ! First we need to change the user-specified identifiers to indices in
+            ! the cell and material arrays
+            do j=1,size(plot_(i) % mask_(1) % components)
+              col_id = plot_(i) % mask_(1) % components(j)
+            
+              if (pl % color_by == PLOT_COLOR_CELLS) then
+              
+                if (cell_dict % has_key(col_id)) then
+                  plot_(i) % mask_(1) % components(j) = cell_dict % get_key(col_id)
+                else
+                  message = "Could not find cell " // trim(to_str(col_id)) // &
+                       " specified in the mask in plot " // trim(to_str(pl % id))
+                  call fatal_error()
+                end if
+              
+              else if (pl % color_by == PLOT_COLOR_MATS) then
+              
+                if (material_dict % has_key(col_id)) then
+                  plot_(i) % mask_(1) % components(j) = material_dict % get_key(col_id)
+                else
+                  message = "Could not find material " // trim(to_str(col_id)) // &
+                       " specified in the mask in plot " // trim(to_str(pl % id))
+                  call fatal_error()
+                end if
+                
+              end if  
+            end do
+          
+            ! Alter colors based on mask information
+            do j=1,size(pl % colors)
+              if (.not. any(j .eq. plot_(i) % mask_(1) % components)) then
+                pl % colors(j) % rgb = plot_(i) % mask_(1) % background
+              end if
+            end do
+            
+        end select
+        
       end if
 
-    end do
+      ! Add plot to dictionary
+      call plot_dict % add_key(pl % id, i)
+
+    end do READ_PLOTS
 
   end subroutine read_plots_xml
 
@@ -2302,5 +2534,787 @@ contains
     end do
 
   end subroutine read_cross_sections_xml
+
+!===============================================================================
+! EXPAND_NATURAL_ELEMENT converts natural elements specified using an <element>
+! tag within a material into individual isotopes based on IUPAC Isotopic
+! Compositions of the Elements 2009 (doi:10.1351/PAC-REP-10-06-02). In some
+! cases, modifications have been made to work with ENDF/B-VII.1 where
+! evaluations of particular isotopes don't exist.
+!===============================================================================
+
+  subroutine expand_natural_element(name, xs, density, list_names, &
+       list_density)
+
+    character(*),   intent(in)    :: name
+    character(*),   intent(in)    :: xs
+    real(8),        intent(in)    :: density
+    type(ListChar), intent(inout) :: list_names
+    type(ListReal), intent(inout) :: list_density
+
+    character(2) :: element_name
+
+    element_name = name(1:2)
+    call lower_case(element_name)
+
+    select case (element_name)
+    case ('h')
+      call list_names % append('1001.' // xs)
+      call list_density % append(density * 0.999885_8)
+      call list_names % append('1002.' // xs)
+      call list_density % append(density * 0.000115_8)
+
+    case ('he')
+      call list_names % append('2003.' // xs)
+      call list_density % append(density * 0.00000134_8)
+      call list_names % append('2004.' // xs)
+      call list_density % append(density * 0.99999866_8)
+
+    case ('li')
+      call list_names % append('3006.' // xs)
+      call list_density % append(density * 0.0759_8)
+      call list_names % append('3007.' // xs)
+      call list_density % append(density * 0.9241_8)
+
+    case ('be')
+      call list_names % append('4009.' // xs)
+      call list_density % append(density)
+
+    case ('b')
+      call list_names % append('5010.' // xs)
+      call list_density % append(density * 0.199_8)
+      call list_names % append('5011.' // xs)
+      call list_density % append(density * 0.801_8)
+
+    case ('c')
+      ! The evaluation of Carbon in ENDF/B-VII.1 and JEFF 3.1.2 is a natural
+      ! element, i.e. it's not possible to split into C-12 and C-13.
+      call list_names % append('6000.' // xs)
+      call list_density % append(density)
+
+    case ('n')
+      call list_names % append('7014.' // xs)
+      call list_density % append(density * 0.99636_8)
+      call list_names % append('7015.' // xs)
+      call list_density % append(density * 0.00364_8)
+
+    case ('o')
+      ! O-18 does not exist in ENDF/B-VII.1 or JEFF 3.1.2 so its 0.205% has been
+      ! added to O-16. The isotopic abundance for O-16 is ordinarily 99.757%.
+      call list_names % append('8016.' // xs)
+      call list_density % append(density * 0.99962_8)
+      call list_names % append('8017.' // xs)
+      call list_density % append(density * 0.00038_8)
+
+    case ('f')
+      call list_names % append('9019.' // xs)
+      call list_density % append(density)
+
+    case ('ne')
+      call list_names % append('10020.' // xs)
+      call list_density % append(density * 0.9048_8)
+      call list_names % append('10021.' // xs)
+      call list_density % append(density * 0.0027_8)
+      call list_names % append('10022.' // xs)
+      call list_density % append(density * 0.0925_8)
+
+    case ('na')
+      call list_names % append('11023.' // xs)
+      call list_density % append(density)
+
+    case ('mg')
+      call list_names % append('12024.' // xs)
+      call list_density % append(density * 0.7899_8)
+      call list_names % append('12025.' // xs)
+      call list_density % append(density * 0.1000_8)
+      call list_names % append('12026.' // xs)
+      call list_density % append(density * 0.1101_8)
+
+    case ('al')
+      call list_names % append('13027.' // xs)
+      call list_density % append(density)
+
+    case ('si')
+      call list_names % append('14028.' // xs)
+      call list_density % append(density * 0.92223_8)
+      call list_names % append('14029.' // xs)
+      call list_density % append(density * 0.04685_8)
+      call list_names % append('14030.' // xs)
+      call list_density % append(density * 0.03092_8)
+
+    case ('p')
+      call list_names % append('15031.' // xs)
+      call list_density % append(density)
+
+    case ('s')
+      call list_names % append('16032.' // xs)
+      call list_density % append(density * 0.9499_8)
+      call list_names % append('16033.' // xs)
+      call list_density % append(density * 0.0075_8)
+      call list_names % append('16034.' // xs)
+      call list_density % append(density * 0.0425_8)
+      call list_names % append('16036.' // xs)
+      call list_density % append(density * 0.0001_8)
+
+    case ('cl')
+      call list_names % append('17035.' // xs)
+      call list_density % append(density * 0.7576_8)
+      call list_names % append('17037.' // xs)
+      call list_density % append(density * 0.2424_8)
+
+    case ('ar')
+      call list_names % append('18036.' // xs)
+      call list_density % append(density * 0.003336_8)
+      call list_names % append('18038.' // xs)
+      call list_density % append(density * 0.000629_8)
+      call list_names % append('18040.' // xs)
+      call list_density % append(density * 0.996035_8)
+
+    case ('k')
+      call list_names % append('19039.' // xs)
+      call list_density % append(density * 0.932581_8)
+      call list_names % append('19040.' // xs)
+      call list_density % append(density * 0.000117_8)
+      call list_names % append('19041.' // xs)
+      call list_density % append(density * 0.067302_8)
+
+    case ('ca')
+      call list_names % append('20040.' // xs)
+      call list_density % append(density * 0.96941_8)
+      call list_names % append('20042.' // xs)
+      call list_density % append(density * 0.00647_8)
+      call list_names % append('20043.' // xs)
+      call list_density % append(density * 0.00135_8)
+      call list_names % append('20044.' // xs)
+      call list_density % append(density * 0.02086_8)
+      call list_names % append('20046.' // xs)
+      call list_density % append(density * 0.00004_8)
+      call list_names % append('20048.' // xs)
+      call list_density % append(density * 0.00187_8)
+
+    case ('sc')
+      call list_names % append('21045.' // xs)
+      call list_density % append(density)
+
+    case ('ti')
+      call list_names % append('22046.' // xs)
+      call list_density % append(density * 0.0825_8)
+      call list_names % append('22047.' // xs)
+      call list_density % append(density * 0.0744_8)
+      call list_names % append('22048.' // xs)
+      call list_density % append(density * 0.7372_8)
+      call list_names % append('22049.' // xs)
+      call list_density % append(density * 0.0541_8)
+      call list_names % append('22050.' // xs)
+      call list_density % append(density * 0.0518_8)
+
+    case ('v')
+      ! The evaluation of Vanadium in ENDF/B-VII.1 and JEFF 3.1.2 is a natural
+      ! element. The IUPAC isotopic composition specifies the following
+      ! breakdown which is not used:
+      !   V-50 =  0.250%
+      !   V-51 = 99.750%
+      call list_names % append('23000.' // xs)
+      call list_density % append(density)
+
+    case ('cr')
+      call list_names % append('24050.' // xs)
+      call list_density % append(density * 0.04345_8)
+      call list_names % append('24052.' // xs)
+      call list_density % append(density * 0.83789_8)
+      call list_names % append('24053.' // xs)
+      call list_density % append(density * 0.09501_8)
+      call list_names % append('24054.' // xs)
+      call list_density % append(density * 0.02365_8)
+
+    case ('mn')
+      call list_names % append('25055.' // xs)
+      call list_density % append(density)
+
+    case ('fe')
+      call list_names % append('26054.' // xs)
+      call list_density % append(density * 0.05845_8)
+      call list_names % append('26056.' // xs)
+      call list_density % append(density * 0.91754_8)
+      call list_names % append('26057.' // xs)
+      call list_density % append(density * 0.02119_8)
+      call list_names % append('26058.' // xs)
+      call list_density % append(density * 0.00282_8)
+
+    case ('co')
+      call list_names % append('27059.' // xs)
+      call list_density % append(density)
+
+    case ('ni')
+      call list_names % append('28058.' // xs)
+      call list_density % append(density * 0.68077_8)
+      call list_names % append('28060.' // xs)
+      call list_density % append(density * 0.26223_8)
+      call list_names % append('28061.' // xs)
+      call list_density % append(density * 0.011399_8)
+      call list_names % append('28062.' // xs)
+      call list_density % append(density * 0.036346_8)
+      call list_names % append('28064.' // xs)
+      call list_density % append(density * 0.009255_8)
+
+    case ('cu')
+      call list_names % append('29063.' // xs)
+      call list_density % append(density * 0.6915_8)
+      call list_names % append('29065.' // xs)
+      call list_density % append(density * 0.3085_8)
+
+    case ('zn')
+      ! The evaluation of Zinc in ENDF/B-VII.1 is a natural element. The IUPAC
+      ! isotopic composition specifies the following breakdown which is not used
+      ! here:
+      !   Zn-64 = 48.63%
+      !   Zn-66 = 27.90%
+      !   Zn-67 =  4.10%
+      !   Zn-68 = 18.75%
+      !   Zn-70 =  0.62%
+      call list_names % append('30000.' // xs)
+      call list_density % append(density)
+
+    case ('ga')
+      ! JEFF 3.1.2 does not have evaluations for Ga-69 and Ga-71, only for
+      ! natural Gallium, so this may cause problems.
+      call list_names % append('31069.' // xs)
+      call list_density % append(density * 0.60108_8)
+      call list_names % append('31071.' // xs)
+      call list_density % append(density * 0.39892_8)
+
+    case ('ge')
+      call list_names % append('32070.' // xs)
+      call list_density % append(density * 0.2057_8)
+      call list_names % append('32072.' // xs)
+      call list_density % append(density * 0.2745_8)
+      call list_names % append('32073.' // xs)
+      call list_density % append(density * 0.0775_8)
+      call list_names % append('32074.' // xs)
+      call list_density % append(density * 0.3650_8)
+      call list_names % append('32076.' // xs)
+      call list_density % append(density * 0.0773_8)
+
+    case ('as')
+      call list_names % append('33075.' // xs)
+      call list_density % append(density)
+
+    case ('se')
+      call list_names % append('34074.' // xs)
+      call list_density % append(density * 0.0089_8)
+      call list_names % append('34076.' // xs)
+      call list_density % append(density * 0.0937_8)
+      call list_names % append('34077.' // xs)
+      call list_density % append(density * 0.0763_8)
+      call list_names % append('34078.' // xs)
+      call list_density % append(density * 0.2377_8)
+      call list_names % append('34080.' // xs)
+      call list_density % append(density * 0.4961_8)
+      call list_names % append('34082.' // xs)
+      call list_density % append(density * 0.0873_8)
+
+    case ('br')
+      call list_names % append('35079.' // xs)
+      call list_density % append(density * 0.5069_8)
+      call list_names % append('35081.' // xs)
+      call list_density % append(density * 0.4931_8)
+
+    case ('kr')
+      call list_names % append('36078.' // xs)
+      call list_density % append(density * 0.00355_8)
+      call list_names % append('36080.' // xs)
+      call list_density % append(density * 0.02286_8)
+      call list_names % append('36082.' // xs)
+      call list_density % append(density * 0.11593_8)
+      call list_names % append('36083.' // xs)
+      call list_density % append(density * 0.11500_8)
+      call list_names % append('36084.' // xs)
+      call list_density % append(density * 0.56987_8)
+      call list_names % append('36086.' // xs)
+      call list_density % append(density * 0.17279_8)
+
+    case ('rb')
+      call list_names % append('37085.' // xs)
+      call list_density % append(density * 0.7217_8)
+      call list_names % append('37087.' // xs)
+      call list_density % append(density * 0.2783_8)
+
+    case ('sr')
+      call list_names % append('38084.' // xs)
+      call list_density % append(density * 0.0056_8)
+      call list_names % append('38086.' // xs)
+      call list_density % append(density * 0.0986_8)
+      call list_names % append('38087.' // xs)
+      call list_density % append(density * 0.0700_8)
+      call list_names % append('38088.' // xs)
+      call list_density % append(density * 0.8258_8)
+
+    case ('y')
+      call list_names % append('39089.' // xs)
+      call list_density % append(density)
+
+    case ('zr')
+      call list_names % append('40090.' // xs)
+      call list_density % append(density * 0.5145_8)
+      call list_names % append('40091.' // xs)
+      call list_density % append(density * 0.1122_8)
+      call list_names % append('40092.' // xs)
+      call list_density % append(density * 0.1715_8)
+      call list_names % append('40094.' // xs)
+      call list_density % append(density * 0.1738_8)
+      call list_names % append('40096.' // xs)
+      call list_density % append(density * 0.0280_8)
+
+    case ('nb')
+      call list_names % append('41093.' // xs)
+      call list_density % append(density)
+
+    case ('mo')
+      call list_names % append('42092.' // xs)
+      call list_density % append(density * 0.1453_8)
+      call list_names % append('42094.' // xs)
+      call list_density % append(density * 0.0915_8)
+      call list_names % append('42095.' // xs)
+      call list_density % append(density * 0.1584_8)
+      call list_names % append('42096.' // xs)
+      call list_density % append(density * 0.1667_8)
+      call list_names % append('42097.' // xs)
+      call list_density % append(density * 0.0960_8)
+      call list_names % append('42098.' // xs)
+      call list_density % append(density * 0.2439_8)
+      call list_names % append('42100.' // xs)
+      call list_density % append(density * 0.0982_8)
+
+    case ('ru')
+      call list_names % append('44096.' // xs)
+      call list_density % append(density * 0.0554_8)
+      call list_names % append('44098.' // xs)
+      call list_density % append(density * 0.0187_8)
+      call list_names % append('44099.' // xs)
+      call list_density % append(density * 0.1276_8)
+      call list_names % append('44100.' // xs)
+      call list_density % append(density * 0.1260_8)
+      call list_names % append('44101.' // xs)
+      call list_density % append(density * 0.1706_8)
+      call list_names % append('44102.' // xs)
+      call list_density % append(density * 0.3155_8)
+      call list_names % append('44104.' // xs)
+      call list_density % append(density * 0.1862_8)
+
+    case ('rh')
+      call list_names % append('45103.' // xs)
+      call list_density % append(density)
+
+    case ('pd')
+      call list_names % append('46102.' // xs)
+      call list_density % append(density * 0.0102_8)
+      call list_names % append('46104.' // xs)
+      call list_density % append(density * 0.1114_8)
+      call list_names % append('46105.' // xs)
+      call list_density % append(density * 0.2233_8)
+      call list_names % append('46106.' // xs)
+      call list_density % append(density * 0.2733_8)
+      call list_names % append('46108.' // xs)
+      call list_density % append(density * 0.2646_8)
+      call list_names % append('46110.' // xs)
+      call list_density % append(density * 0.1172_8)
+
+    case ('ag')
+      call list_names % append('47107.' // xs)
+      call list_density % append(density * 0.51839_8)
+      call list_names % append('47109.' // xs)
+      call list_density % append(density * 0.48161_8)
+
+    case ('cd')
+      call list_names % append('48106.' // xs)
+      call list_density % append(density * 0.0125_8)
+      call list_names % append('48108.' // xs)
+      call list_density % append(density * 0.0089_8)
+      call list_names % append('48110.' // xs)
+      call list_density % append(density * 0.1249_8)
+      call list_names % append('48111.' // xs)
+      call list_density % append(density * 0.1280_8)
+      call list_names % append('48112.' // xs)
+      call list_density % append(density * 0.2413_8)
+      call list_names % append('48113.' // xs)
+      call list_density % append(density * 0.1222_8)
+      call list_names % append('48114.' // xs)
+      call list_density % append(density * 0.2873_8)
+      call list_names % append('48116.' // xs)
+      call list_density % append(density * 0.0749_8)
+
+    case ('in')
+      call list_names % append('49113.' // xs)
+      call list_density % append(density * 0.0429_8)
+      call list_names % append('49115.' // xs)
+      call list_density % append(density * 0.9571_8)
+
+    case ('sn')
+      call list_names % append('50112.' // xs)
+      call list_density % append(density * 0.0097_8)
+      call list_names % append('50114.' // xs)
+      call list_density % append(density * 0.0066_8)
+      call list_names % append('50115.' // xs)
+      call list_density % append(density * 0.0034_8)
+      call list_names % append('50116.' // xs)
+      call list_density % append(density * 0.1454_8)
+      call list_names % append('50117.' // xs)
+      call list_density % append(density * 0.0768_8)
+      call list_names % append('50118.' // xs)
+      call list_density % append(density * 0.2422_8)
+      call list_names % append('50119.' // xs)
+      call list_density % append(density * 0.0859_8)
+      call list_names % append('50120.' // xs)
+      call list_density % append(density * 0.3258_8)
+      call list_names % append('50122.' // xs)
+      call list_density % append(density * 0.0463_8)
+      call list_names % append('50124.' // xs)
+      call list_density % append(density * 0.0579_8)
+
+    case ('sb')
+      call list_names % append('51121.' // xs)
+      call list_density % append(density * 0.5721_8)
+      call list_names % append('51123.' // xs)
+      call list_density % append(density * 0.4279_8)
+
+    case ('te')
+      call list_names % append('52120.' // xs)
+      call list_density % append(density * 0.0009_8)
+      call list_names % append('52122.' // xs)
+      call list_density % append(density * 0.0255_8)
+      call list_names % append('52123.' // xs)
+      call list_density % append(density * 0.0089_8)
+      call list_names % append('52124.' // xs)
+      call list_density % append(density * 0.0474_8)
+      call list_names % append('52125.' // xs)
+      call list_density % append(density * 0.0707_8)
+      call list_names % append('52126.' // xs)
+      call list_density % append(density * 0.1884_8)
+      call list_names % append('52128.' // xs)
+      call list_density % append(density * 0.3174_8)
+      call list_names % append('52130.' // xs)
+      call list_density % append(density * 0.3408_8)
+
+    case ('i')
+      call list_names % append('53127.' // xs)
+      call list_density % append(density)
+
+    case ('xe')
+      call list_names % append('54124.' // xs)
+      call list_density % append(density * 0.000952_8)
+      call list_names % append('54126.' // xs)
+      call list_density % append(density * 0.000890_8)
+      call list_names % append('54128.' // xs)
+      call list_density % append(density * 0.019102_8)
+      call list_names % append('54129.' // xs)
+      call list_density % append(density * 0.264006_8)
+      call list_names % append('54130.' // xs)
+      call list_density % append(density * 0.040710_8)
+      call list_names % append('54131.' // xs)
+      call list_density % append(density * 0.212324_8)
+      call list_names % append('54132.' // xs)
+      call list_density % append(density * 0.269086_8)
+      call list_names % append('54134.' // xs)
+      call list_density % append(density * 0.104357_8)
+      call list_names % append('54136.' // xs)
+      call list_density % append(density * 0.088573_8)
+
+    case ('cs')
+      call list_names % append('55133.' // xs)
+      call list_density % append(density)
+
+    case ('ba')
+      call list_names % append('56130.' // xs)
+      call list_density % append(density * 0.00106_8)
+      call list_names % append('56132.' // xs)
+      call list_density % append(density * 0.00101_8)
+      call list_names % append('56134.' // xs)
+      call list_density % append(density * 0.02417_8)
+      call list_names % append('56135.' // xs)
+      call list_density % append(density * 0.06592_8)
+      call list_names % append('56136.' // xs)
+      call list_density % append(density * 0.07854_8)
+      call list_names % append('56137.' // xs)
+      call list_density % append(density * 0.11232_8)
+      call list_names % append('56138.' // xs)
+      call list_density % append(density * 0.71698_8)
+
+    case ('la')
+      call list_names % append('57138.' // xs)
+      call list_density % append(density * 0.0008881_8)
+      call list_names % append('57139.' // xs)
+      call list_density % append(density * 0.9991119_8)
+
+    case ('ce')
+      call list_names % append('58136.' // xs)
+      call list_density % append(density * 0.00185_8)
+      call list_names % append('58138.' // xs)
+      call list_density % append(density * 0.00251_8)
+      call list_names % append('58140.' // xs)
+      call list_density % append(density * 0.88450_8)
+      call list_names % append('58142.' // xs)
+      call list_density % append(density * 0.11114_8)
+
+    case ('pr')
+      call list_names % append('59141.' // xs)
+      call list_density % append(density)
+
+    case ('nd')
+      call list_names % append('60142.' // xs)
+      call list_density % append(density * 0.27152_8)
+      call list_names % append('60143.' // xs)
+      call list_density % append(density * 0.12174_8)
+      call list_names % append('60144.' // xs)
+      call list_density % append(density * 0.23798_8)
+      call list_names % append('60145.' // xs)
+      call list_density % append(density * 0.08293_8)
+      call list_names % append('60146.' // xs)
+      call list_density % append(density * 0.17189_8)
+      call list_names % append('60148.' // xs)
+      call list_density % append(density * 0.05756_8)
+      call list_names % append('60150.' // xs)
+      call list_density % append(density * 0.05638_8)
+
+    case ('sm')
+      call list_names % append('62144.' // xs)
+      call list_density % append(density * 0.0307_8)
+      call list_names % append('62147.' // xs)
+      call list_density % append(density * 0.1499_8)
+      call list_names % append('62148.' // xs)
+      call list_density % append(density * 0.1124_8)
+      call list_names % append('62149.' // xs)
+      call list_density % append(density * 0.1382_8)
+      call list_names % append('62150.' // xs)
+      call list_density % append(density * 0.0738_8)
+      call list_names % append('62152.' // xs)
+      call list_density % append(density * 0.2675_8)
+      call list_names % append('62154.' // xs)
+      call list_density % append(density * 0.2275_8)
+
+    case ('eu')
+      call list_names % append('63151.' // xs)
+      call list_density % append(density * 0.4781_8)
+      call list_names % append('63153.' // xs)
+      call list_density % append(density * 0.5219_8)
+
+    case ('gd')
+      call list_names % append('64152.' // xs)
+      call list_density % append(density * 0.0020_8)
+      call list_names % append('64154.' // xs)
+      call list_density % append(density * 0.0218_8)
+      call list_names % append('64155.' // xs)
+      call list_density % append(density * 0.1480_8)
+      call list_names % append('64156.' // xs)
+      call list_density % append(density * 0.2047_8)
+      call list_names % append('64157.' // xs)
+      call list_density % append(density * 0.1565_8)
+      call list_names % append('64158.' // xs)
+      call list_density % append(density * 0.2484_8)
+      call list_names % append('64160.' // xs)
+      call list_density % append(density * 0.2186_8)
+
+    case ('tb')
+      call list_names % append('65159.' // xs)
+      call list_density % append(density)
+
+    case ('dy')
+      call list_names % append('66156.' // xs)
+      call list_density % append(density * 0.00056_8)
+      call list_names % append('66158.' // xs)
+      call list_density % append(density * 0.00095_8)
+      call list_names % append('66160.' // xs)
+      call list_density % append(density * 0.02329_8)
+      call list_names % append('66161.' // xs)
+      call list_density % append(density * 0.18889_8)
+      call list_names % append('66162.' // xs)
+      call list_density % append(density * 0.25475_8)
+      call list_names % append('66163.' // xs)
+      call list_density % append(density * 0.24896_8)
+      call list_names % append('66164.' // xs)
+      call list_density % append(density * 0.28260_8)
+
+    case ('ho')
+      call list_names % append('67165.' // xs)
+      call list_density % append(density)
+
+    case ('er')
+      call list_names % append('68162.' // xs)
+      call list_density % append(density * 0.00139_8)
+      call list_names % append('68164.' // xs)
+      call list_density % append(density * 0.01601_8)
+      call list_names % append('68166.' // xs)
+      call list_density % append(density * 0.33503_8)
+      call list_names % append('68167.' // xs)
+      call list_density % append(density * 0.22869_8)
+      call list_names % append('68168.' // xs)
+      call list_density % append(density * 0.26978_8)
+      call list_names % append('68170.' // xs)
+      call list_density % append(density * 0.14910_8)
+
+    case ('tm')
+      call list_names % append('69169.' // xs)
+      call list_density % append(density)
+
+    case ('yb')
+      call list_names % append('70168.' // xs)
+      call list_density % append(density * 0.00123_8)
+      call list_names % append('70170.' // xs)
+      call list_density % append(density * 0.02982_8)
+      call list_names % append('70171.' // xs)
+      call list_density % append(density * 0.1409_8)
+      call list_names % append('70172.' // xs)
+      call list_density % append(density * 0.2168_8)
+      call list_names % append('70173.' // xs)
+      call list_density % append(density * 0.16103_8)
+      call list_names % append('70174.' // xs)
+      call list_density % append(density * 0.32026_8)
+      call list_names % append('70176.' // xs)
+      call list_density % append(density * 0.12996_8)
+
+    case ('lu')
+      call list_names % append('71175.' // xs)
+      call list_density % append(density * 0.97401_8)
+      call list_names % append('71176.' // xs)
+      call list_density % append(density * 0.02599_8)
+
+    case ('hf')
+      call list_names % append('72174.' // xs)
+      call list_density % append(density * 0.0016_8)
+      call list_names % append('72176.' // xs)
+      call list_density % append(density * 0.0526_8)
+      call list_names % append('72177.' // xs)
+      call list_density % append(density * 0.1860_8)
+      call list_names % append('72178.' // xs)
+      call list_density % append(density * 0.2728_8)
+      call list_names % append('72179.' // xs)
+      call list_density % append(density * 0.1362_8)
+      call list_names % append('72180.' // xs)
+      call list_density % append(density * 0.3508_8)
+
+    case ('ta')
+      call list_names % append('73180.' // xs)
+      call list_density % append(density * 0.0001201_8)
+      call list_names % append('73181.' // xs)
+      call list_density % append(density * 0.9998799_8)
+
+    case ('w')
+      ! ENDF/B-VII.0 does not have W-180 so this may cause problems. However, it
+      ! has been added as of ENDF/B-VII.1
+      call list_names % append('74180.' // xs)
+      call list_density % append(density * 0.0012_8)
+      call list_names % append('74182.' // xs)
+      call list_density % append(density * 0.2650_8)
+      call list_names % append('74183.' // xs)
+      call list_density % append(density * 0.1431_8)
+      call list_names % append('74184.' // xs)
+      call list_density % append(density * 0.3064_8)
+      call list_names % append('74186.' // xs)
+      call list_density % append(density * 0.2843_8)
+
+    case ('re')
+      call list_names % append('75185.' // xs)
+      call list_density % append(density * 0.3740_8)
+      call list_names % append('75187.' // xs)
+      call list_density % append(density * 0.6260_8)
+
+    case ('os')
+      call list_names % append('76184.' // xs)
+      call list_density % append(density * 0.0002_8)
+      call list_names % append('76186.' // xs)
+      call list_density % append(density * 0.0159_8)
+      call list_names % append('76187.' // xs)
+      call list_density % append(density * 0.0196_8)
+      call list_names % append('76188.' // xs)
+      call list_density % append(density * 0.1324_8)
+      call list_names % append('76189.' // xs)
+      call list_density % append(density * 0.1615_8)
+      call list_names % append('76190.' // xs)
+      call list_density % append(density * 0.2626_8)
+      call list_names % append('76192.' // xs)
+      call list_density % append(density * 0.4078_8)
+
+    case ('ir')
+      call list_names % append('77191.' // xs)
+      call list_density % append(density * 0.373_8)
+      call list_names % append('77193.' // xs)
+      call list_density % append(density * 0.627_8)
+
+    case ('pt')
+      call list_names % append('78190.' // xs)
+      call list_density % append(density * 0.00012_8)
+      call list_names % append('78192.' // xs)
+      call list_density % append(density * 0.00782_8)
+      call list_names % append('78194.' // xs)
+      call list_density % append(density * 0.3286_8)
+      call list_names % append('78195.' // xs)
+      call list_density % append(density * 0.3378_8)
+      call list_names % append('78196.' // xs)
+      call list_density % append(density * 0.2521_8)
+      call list_names % append('78198.' // xs)
+      call list_density % append(density * 0.07356_8)
+
+    case ('au')
+      call list_names % append('79197.' // xs)
+      call list_density % append(density)
+
+    case ('hg')
+      call list_names % append('80196.' // xs)
+      call list_density % append(density * 0.0015_8)
+      call list_names % append('80198.' // xs)
+      call list_density % append(density * 0.0997_8)
+      call list_names % append('80199.' // xs)
+      call list_density % append(density * 0.1687_8)
+      call list_names % append('80200.' // xs)
+      call list_density % append(density * 0.2310_8)
+      call list_names % append('80201.' // xs)
+      call list_density % append(density * 0.1318_8)
+      call list_names % append('80202.' // xs)
+      call list_density % append(density * 0.2986_8)
+      call list_names % append('80204.' // xs)
+      call list_density % append(density * 0.0687_8)
+
+    case ('tl')
+      call list_names % append('81203.' // xs)
+      call list_density % append(density * 0.2952_8)
+      call list_names % append('81205.' // xs)
+      call list_density % append(density * 0.7048_8)
+
+    case ('pb')
+      call list_names % append('82204.' // xs)
+      call list_density % append(density * 0.014_8)
+      call list_names % append('82206.' // xs)
+      call list_density % append(density * 0.241_8)
+      call list_names % append('82207.' // xs)
+      call list_density % append(density * 0.221_8)
+      call list_names % append('82208.' // xs)
+      call list_density % append(density * 0.524_8)
+
+    case ('bi')
+      call list_names % append('83209.' // xs)
+      call list_density % append(density)
+
+    case ('th')
+      call list_names % append('90232.' // xs)
+      call list_density % append(density)
+
+    case ('pa')
+      call list_names % append('91231.' // xs)
+      call list_density % append(density)
+
+    case ('u')
+      call list_names % append('92234.' // xs)
+      call list_density % append(density * 0.000054_8)
+      call list_names % append('92235.' // xs)
+      call list_density % append(density * 0.007204_8)
+      call list_names % append('92238.' // xs)
+      call list_density % append(density * 0.992742_8)
+
+    case default
+      message = "Cannot expand element: " // name
+      call fatal_error()
+
+    end select
+
+  end subroutine expand_natural_element
 
 end module input_xml

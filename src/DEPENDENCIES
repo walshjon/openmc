@@ -156,6 +156,7 @@ geometry.o: geometry_header.o
 geometry.o: global.o
 geometry.o: output.o
 geometry.o: particle_header.o
+geometry.o: particle_restart_write.o
 geometry.o: string.o
 geometry.o: tally.o
 
@@ -211,6 +212,7 @@ input_xml.o: dict_header.o
 input_xml.o: error.o
 input_xml.o: geometry_header.o
 input_xml.o: global.o
+input_xml.o: list_header.o
 input_xml.o: mesh_header.o
 input_xml.o: output.o
 input_xml.o: plot_header.o
@@ -224,6 +226,7 @@ input_xml.o: templates/geometry_t.o
 input_xml.o: templates/materials_t.o
 input_xml.o: templates/settings_t.o
 input_xml.o: templates/tallies_t.o
+input_xml.o: templates/plots_t.o
 
 interpolation.o: constants.o
 interpolation.o: endf_header.o
@@ -240,6 +243,7 @@ main.o: finalize.o
 main.o: fixed_source.o
 main.o: global.o
 main.o: initialize.o
+main.o: particle_restart.o
 main.o: plot.o
 
 math.o: constants.o
@@ -265,6 +269,22 @@ output.o: tally_header.o
 
 particle_header.o: constants.o
 
+particle_restart.o: bank_header.o
+particle_restart.o: constants.o
+particle_restart.o: geometry_header.o
+particle_restart.o: global.o
+particle_restart.o: hdf5_interface.o
+particle_restart.o: particle_header.o
+particle_restart.o: output.o
+particle_restart.o: physics.o
+particle_restart.o: random_lcg.o
+particle_restart.o: source.o
+
+particle_restart_write.o: bank_header.o
+particle_restart_write.o: global.o
+particle_restart_write.o: hdf5_interface.o
+particle_restart_write.o: string.o
+
 physics.o: ace_header.o
 physics.o: constants.o
 physics.o: cross_section.o
@@ -279,6 +299,7 @@ physics.o: material_header.o
 physics.o: mesh.o
 physics.o: output.o
 physics.o: particle_header.o
+physics.o: particle_restart_write.o
 physics.o: random_lcg.o
 physics.o: search.o
 physics.o: string.o
@@ -314,15 +335,14 @@ source.o: output.o
 source.o: particle_header.o
 source.o: physics.o
 source.o: random_lcg.o
+source.o: state_point.o
 source.o: string.o
 
 state_point.o: error.o
 state_point.o: global.o
 state_point.o: math.o
 state_point.o: output.o
-state_point.o: source.o
 state_point.o: string.o
-state_point.o: tally.o
 state_point.o: tally_header.o
 
 string.o: constants.o

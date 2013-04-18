@@ -32,13 +32,17 @@ contains
 
   subroutine read_xs()
 
-    integer        :: i         ! index in materials array
-    integer        :: j         ! index over nuclides in material
-    integer        :: i_listing ! index in xs_listings array
-    integer        :: i_nuclide ! index in nuclides
-    integer        :: i_sab     ! index in sab_tables
-    character(12)  :: name      ! name of isotope, e.g. 92235.03c
-    character(12)  :: alias     ! alias of nuclide, e.g. U-235.03c
+    integer :: i            ! index in materials array
+    integer :: j            ! index over nuclides in material
+    integer :: k            ! index over S(a,b) tables in material
+    integer :: i_listing    ! index in xs_listings array
+    integer :: i_nuclide    ! index in nuclides
+    integer :: i_sab        ! index in sab_tables
+    integer :: m            ! position for sorting
+    integer :: temp_nuclide ! temporary value for sorting
+    integer :: temp_table   ! temporary value for sorting
+    character(12)  :: name  ! name of isotope, e.g. 92235.03c
+    character(12)  :: alias ! alias of nuclide, e.g. U-235.03c
     type(Material),   pointer :: mat => null()
     type(Nuclide),    pointer :: nuc => null()
     type(SAlphaBeta), pointer :: sab => null()
@@ -53,10 +57,10 @@ contains
     ! READ ALL ACE CROSS SECTION TABLES
 
     ! Loop over all files
-    do i = 1, n_materials
+    MATERIAL_LOOP: do i = 1, n_materials
       mat => materials(i)
 
-      do j = 1, mat % n_nuclides
+      NUCLIDE_LOOP: do j = 1, mat % n_nuclides
         name = mat % names(j)
 
         if (.not. already_read % contains(name)) then
@@ -77,10 +81,11 @@ contains
           call already_read % add(name)
           call already_read % add(alias)
         end if
-      end do
+      end do NUCLIDE_LOOP
 
-      if (mat % has_sab_table) then
-        name = mat % sab_name
+      SAB_LOOP: do k = 1, mat % n_sab
+        ! Get name of S(a,b) table
+        name = mat % sab_names(k)
 
         if (.not. already_read % contains(name)) then
           i_listing = xs_listing_dict % get_key(name)
@@ -93,37 +98,77 @@ contains
           ! Add name to dictionary
           call already_read % add(name)
         end if
-      end if
-    end do
+      end do SAB_LOOP
+    end do MATERIAL_LOOP
 
     ! ==========================================================================
     ! ASSIGN S(A,B) TABLES TO SPECIFIC NUCLIDES WITHIN MATERIALS
 
-    do i = 1, n_materials
+    MATERIAL_LOOP2: do i = 1, n_materials
+      ! Get pointer to material
       mat => materials(i)
 
-      if (mat % has_sab_table) then
-        ! In order to know which nuclide the S(a,b) table applies to, we need
-        ! to search through the list of nuclides for one which has a matching
-        ! zaid
-        sab => sab_tables(mat % sab_table)
+      ASSIGN_SAB: do k = 1, mat % n_sab
+        ! In order to know which nuclide the S(a,b) table applies to, we need to
+        ! search through the list of nuclides for one which has a matching zaid
+        sab => sab_tables(mat % i_sab_tables(k))
 
-        do j = 1, mat % n_nuclides
-          nuc => nuclides(mat % nuclide(j))
-          if (nuc % zaid == sab % zaid) then
-            mat % sab_nuclide = j
+        ! Loop through nuclides and find  match
+        FIND_NUCLIDE: do j = 1, mat % n_nuclides
+          if (nuclides(mat % nuclide(j)) % zaid == sab % zaid) then
+            mat % i_sab_nuclides(k) = j
+            exit FIND_NUCLIDE
           end if
-        end do
+        end do FIND_NUCLIDE
 
         ! Check to make sure S(a,b) table matched a nuclide
-        if (mat % sab_nuclide == 0) then
-          message = "S(a,b) table " // trim(mat % sab_name) // " did not match &
-               &any nuclide on material " // trim(to_str(mat % id))
+        if (mat % i_sab_nuclides(k) == NONE) then
+          message = "S(a,b) table " // trim(mat % sab_names(k)) // " did not &
+               &match any nuclide on material " // trim(to_str(mat % id))
           call fatal_error()
         end if
-      end if
-    end do
+      end do ASSIGN_SAB
 
+      ! If there are multiple S(a,b) tables, we need to make sure that the
+      ! entries in i_sab_nuclides are sorted or else they won't be applied
+      ! correctly in the cross_section module. The algorithm here is a simple
+      ! insertion sort -- don't need anything fancy!
+
+      if (mat % n_sab > 1) then
+        SORT_SAB: do k = 2, mat % n_sab
+          ! Save value to move
+          m = k
+          temp_nuclide = mat % i_sab_nuclides(k)
+          temp_table   = mat % i_sab_tables(k)
+
+          MOVE_OVER: do
+            ! Check if insertion value is greater than (m-1)th value
+            if (temp_nuclide >= mat % i_sab_nuclides(m-1)) exit
+
+            ! Move values over until hitting one that's not larger
+            mat % i_sab_nuclides(m) = mat % i_sab_nuclides(m-1)
+            mat % i_sab_tables(m)   = mat % i_sab_tables(m-1)
+            m = m - 1
+
+            ! Exit if we've reached the beginning of the list
+            if (m == 1) exit
+          end do MOVE_OVER
+
+          ! Put the original value into its new position
+          mat % i_sab_nuclides(m) = temp_nuclide
+          mat % i_sab_tables(m)   = temp_table
+        end do SORT_SAB
+      end if
+      
+      ! Deallocate temporary arrays for names of nuclides and S(a,b) tables
+      if (allocated(mat % names)) deallocate(mat % names)
+      if (allocated(mat % sab_names)) deallocate(mat % sab_names)
+
+    end do MATERIAL_LOOP2
+    
+    ! Avoid some valgrind leak errors
+    call already_read % clear()
+    
   end subroutine read_xs
 
 !===============================================================================

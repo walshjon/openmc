@@ -385,6 +385,7 @@ contains
     integer, intent(in)        :: i_score ! index for score
 
     integer :: i             ! index of outgoing energy filter
+    integer :: n             ! number of energies on filter
     integer :: k             ! loop index for bank sites
     integer :: bin_energyout ! original outgoing energy bin
     integer :: i_filter      ! index for matching filter bin combination
@@ -394,6 +395,9 @@ contains
     ! save original outgoing energy bin and score index
     i = t % find_filter(FILTER_ENERGYOUT)
     bin_energyout = t % matching_bins(i)
+
+    ! Get number of energies on filter
+    n = size(t % filters(i) % real_bins)
 
     ! Since the creation of fission sites is weighted such that it is
     ! expected to create n_particles sites, we need to multiply the
@@ -408,9 +412,12 @@ contains
       ! determine outgoing energy from fission bank
       E_out = fission_bank(n_bank - p % n_bank + k) % E
 
+      ! check if outgoing energy is within specified range on filter
+      if (E_out < t % filters(i) % real_bins(1) .or. &
+           E_out > t % filters(i) % real_bins(n)) cycle
+
       ! change outgoing energy bin
-      t % matching_bins(i) = binary_search(t % filters(i) % real_bins, &
-           size(t % filters(i) % real_bins), E_out)
+      t % matching_bins(i) = binary_search(t % filters(i) % real_bins, n, E_out)
 
       ! determine scoring index
       i_filter = sum((t % matching_bins - 1) * t % stride) + 1
@@ -530,6 +537,10 @@ contains
               ! DETERMINE NUCLIDE CROSS SECTION
 
               select case(score_bin)
+              case (SCORE_FLUX)
+                ! For flux, we need no cross section
+                score = flux
+
               case (SCORE_TOTAL)
                 ! Total cross section is pre-calculated
                 score = micro_xs(i_nuclide) % total * &
@@ -769,6 +780,9 @@ contains
 
         ! Determine macroscopic nuclide cross section 
         select case(score_bin)
+        case (SCORE_FLUX)
+          score = flux
+
         case (SCORE_TOTAL)
           score = micro_xs(i_nuclide) % total * atom_density * flux
 
@@ -997,8 +1011,8 @@ contains
 
     ! Determine indices for starting and ending location
     m => meshes(t % filters(i_filter_mesh) % int_bins(1))
-    call get_mesh_indices(m, xyz0, ijk0, start_in_mesh)
-    call get_mesh_indices(m, xyz1, ijk1, end_in_mesh)
+    call get_mesh_indices(m, xyz0, ijk0(:m % n_dimension), start_in_mesh)
+    call get_mesh_indices(m, xyz1, ijk1(:m % n_dimension), end_in_mesh)
 
     ! Check if start or end is in mesh -- if not, check if track still
     ! intersects with mesh
@@ -1178,6 +1192,8 @@ contains
               if (i_nuclide > 0) then
                 ! Determine macroscopic nuclide cross section 
                 select case(score_bin)
+                case (SCORE_FLUX)
+                  score = flux
                 case (SCORE_TOTAL)
                   score = micro_xs(i_nuclide) % total * &
                        atom_density * flux
@@ -1339,8 +1355,8 @@ contains
         n = t % filters(i) % n_bins
 
         ! check if energy of the particle is within energy bins
-        if (E < t % filters(i) % real_bins(1) .or. &
-             E > t % filters(i) % real_bins(n + 1)) then
+        if (p % E < t % filters(i) % real_bins(1) .or. &
+             p % E > t % filters(i) % real_bins(n + 1)) then
           t % matching_bins(i) = NO_BIN_FOUND
         else
           ! search to find incoming energy bin
@@ -1407,8 +1423,8 @@ contains
 
       ! Determine indices for starting and ending location
       m => meshes(t % filters(i_filter_mesh) % int_bins(1))
-      call get_mesh_indices(m, xyz0, ijk0, start_in_mesh)
-      call get_mesh_indices(m, xyz1, ijk1, end_in_mesh)
+      call get_mesh_indices(m, xyz0, ijk0(:m % n_dimension), start_in_mesh)
+      call get_mesh_indices(m, xyz1, ijk1(:m % n_dimension), end_in_mesh)
 
       ! Check to if start or end is in mesh -- if not, check if track still
       ! intersects with mesh
@@ -1726,6 +1742,9 @@ contains
   subroutine synchronize_tallies()
 
     integer :: i
+    real(8) :: k_col ! Copy of batch collision estimate of keff
+    real(8) :: k_abs ! Copy of batch absorption estimate of keff
+    real(8) :: k_tra ! Copy of batch tracklength estimate of keff
 
 #ifdef MPI
     ! Combine tally results onto master process
@@ -1752,6 +1771,16 @@ contains
         ! accumulate_result
 
         k_batch(current_batch) = global_tallies(K_TRACKLENGTH) % value
+
+        if (active_batches) then
+          ! Accumulate products of different estimators of k
+          k_col = global_tallies(K_COLLISION) % value / total_weight
+          k_abs = global_tallies(K_ABSORPTION) % value / total_weight
+          k_tra = global_tallies(K_TRACKLENGTH) % value / total_weight
+          k_col_abs = k_col_abs + k_col * k_abs
+          k_col_tra = k_col_tra + k_col * k_tra
+          k_abs_tra = k_abs_tra + k_abs * k_tra
+        end if
       end if
 
       ! Accumulate results for global tallies

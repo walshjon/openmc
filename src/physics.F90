@@ -1,25 +1,27 @@
 module physics
 
-  use ace_header,      only: Nuclide, Reaction, DistEnergy
+  use ace_header,             only: Nuclide, Reaction, DistEnergy
   use constants
-  use cross_section,   only: calculate_xs
-  use endf,            only: reaction_name
-  use error,           only: fatal_error, warning
-  use fission,         only: nu_total, nu_delayed
-  use geometry,        only: find_cell, distance_to_boundary, cross_surface, &
-                             cross_lattice
-  use geometry_header, only: Universe, BASE_UNIVERSE
+  use cross_section,          only: calculate_xs
+  use endf,                   only: reaction_name
+  use error,                  only: fatal_error, warning
+  use fission,                only: nu_total, nu_delayed
+  use geometry,               only: find_cell, distance_to_boundary, &
+                                    cross_surface, cross_lattice
+  use geometry_header,        only: Universe, BASE_UNIVERSE
   use global
-  use interpolation,   only: interpolate_tab1
-  use material_header, only: Material
-  use mesh,            only: get_mesh_indices
-  use output,          only: write_message
-  use particle_header, only: LocalCoord
-  use random_lcg,      only: prn
-  use search,          only: binary_search
-  use string,          only: to_str
-  use tally,           only: score_analog_tally, score_tracklength_tally, &
-                             score_surface_current
+  use interpolation,          only: interpolate_tab1
+  use material_header,        only: Material
+  use mesh,                   only: get_mesh_indices
+  use output,                 only: write_message
+  use particle_header,        only: LocalCoord
+  use particle_restart_write, only: write_particle_restart
+  use random_lcg,             only: prn
+  use search,                 only: binary_search
+  use string,                 only: to_str
+  use tally,                  only: score_analog_tally, &
+                                    score_tracklength_tally, &
+                                    score_surface_current
 
   implicit none
 
@@ -54,6 +56,7 @@ contains
 
       ! Particle couldn't be located
       if (.not. found_cell) then
+        call write_particle_restart()
         message = "Could not locate particle " // trim(to_str(p % id))
         call fatal_error()
       end if
@@ -262,6 +265,7 @@ contains
 
       ! Check to make sure that a nuclide was sampled
       if (i > mat % n_nuclides) then
+        call write_particle_restart()
         message = "Did not sample any nuclide during collision."
         call fatal_error()
       end if
@@ -295,6 +299,12 @@ contains
       p % wgt = p % wgt - p % absorb_wgt
       p % last_wgt = p % wgt
 
+      ! Score implicit absorption estimate of keff. Unlike the analog absorption
+      ! estimate, this only needs to be scored to in one place.
+      global_tallies(K_ABSORPTION) % value = &
+           global_tallies(K_ABSORPTION) % value + p % absorb_wgt * &
+           material_xs % nu_fission / material_xs % absorption
+
     else
       ! set cutoff variable for analog cases
       cutoff = prn() * micro_xs(i_nuclide) % total
@@ -306,6 +316,13 @@ contains
 
       ! See if disappearance reaction happens
       if (prob > cutoff) then
+        ! Score absorption estimate of keff. Note that this appears in three
+        ! places -- absorption reactions, total fission reactions, and
+        ! first/second/etc chance fission reactions
+        global_tallies(K_ABSORPTION) % value = &
+             global_tallies(K_ABSORPTION) % value + p % wgt * &
+             material_xs % nu_fission / material_xs % absorption
+
         p % alive = .false.
         p % event = EVENT_ABSORB
         p % event_MT = N_DISAPPEAR
@@ -342,6 +359,13 @@ contains
           ! With no survival biasing, the particle is absorbed and so its
           ! life is over
           if (.not. survival_biasing) then
+            ! Score absorption estimate of keff. Note that this appears in three
+            ! places -- absorption reactions, total fission reactions, and
+            ! first/second/etc chance fission reactions
+            global_tallies(K_ABSORPTION) % value = &
+                 global_tallies(K_ABSORPTION) % value + p % wgt * &
+                 material_xs % nu_fission / material_xs % absorption
+
             p % alive = .false.
             p % event = EVENT_FISSION
             p % event_MT = rxn % MT
@@ -377,6 +401,13 @@ contains
               ! loop
               exit FISSION_REACTION_LOOP
             else
+              ! Score absorption estimate of keff. Note that this appears in
+              ! three places -- absorption reactions, total fission reactions,
+              ! and first/second/etc chance fission reactions
+              global_tallies(K_ABSORPTION) % value = &
+                   global_tallies(K_ABSORPTION) % value + p % wgt * &
+                   material_xs % nu_fission / material_xs % absorption
+
               ! With no survival biasing, the particle is absorbed and so
               ! its life is over
               p % alive = .false.
@@ -422,9 +453,9 @@ contains
       ! =======================================================================
       ! ELASTIC SCATTERING
 
-      if (micro_xs(i_nuclide) % use_sab) then
+      if (micro_xs(i_nuclide) % index_sab /= NONE) then
         ! S(a,b) scattering
-        call sab_scatter(i_nuclide, mat % sab_table)
+        call sab_scatter(i_nuclide, micro_xs(i_nuclide) % index_sab)
 
       else
         ! get pointer to elastic scattering reaction
@@ -448,6 +479,7 @@ contains
 
         ! Check to make sure inelastic scattering reaction sampled
         if (i > nuc % n_reaction) then
+          call write_particle_restart()
           message = "Did not sample any reaction for nuclide " // &
                trim(nuc % name) // " on material " // &
                trim(to_str(mat % id))
@@ -878,6 +910,7 @@ contains
       ! Determine indices on ufs mesh for current location
       call get_mesh_indices(ufs_mesh, p % coord0 % xyz, ijk, in_mesh)
       if (.not. in_mesh) then
+        call write_particle_restart()
         message = "Source site outside UFS mesh!"
         call fatal_error()
       end if
@@ -970,6 +1003,7 @@ contains
           ! check for large number of resamples
           n_sample = n_sample + 1
           if (n_sample == MAX_SAMPLE) then
+            call write_particle_restart()
             message = "Resampled energy distribution maximum number of " // &
                  "times for nuclide " // nuc % name
             call fatal_error()
@@ -996,6 +1030,7 @@ contains
           ! check for large number of resamples
           n_sample = n_sample + 1
           if (n_sample == MAX_SAMPLE) then
+            call write_particle_restart()
             message = "Resampled energy distribution maximum number of " // &
                  "times for nuclide " // nuc % name
             call fatal_error()
@@ -1206,6 +1241,7 @@ contains
           mu = mu0 + (sqrt(max(ZERO, p0*p0 + 2*frac*(xi - c_k))) - p0)/frac
         end if
       else
+        call write_particle_restart()
         message = "Unknown interpolation type: " // trim(to_str(interp))
         call fatal_error()
       end if
@@ -1217,6 +1253,7 @@ contains
       if (abs(mu) > ONE) mu = sign(ONE,mu)
 
     else
+      call write_particle_restart()
       message = "Unknown angular distribution type: " // trim(to_str(type))
       call fatal_error()
     end if
@@ -1367,6 +1404,7 @@ contains
       NE  = int(edist % data(2 + 2*NR))
       NET = int(edist % data(3 + 2*NR + NE))
       if (NR > 0) then
+        call write_particle_restart()
         message = "Multiple interpolation regions not supported while &
              &attempting to sample equiprobable energy bins."
         call fatal_error()
@@ -1432,6 +1470,7 @@ contains
       NR  = int(edist % data(1))
       NE  = int(edist % data(2 + 2*NR))
       if (NR > 0) then
+        call write_particle_restart()
         message = "Multiple interpolation regions not supported while &
              &attempting to sample continuous tabular distribution."
         call fatal_error()
@@ -1491,6 +1530,7 @@ contains
 
       if (ND > 0) then
         ! discrete lines present
+        call write_particle_restart()
         message = "Discrete lines in continuous tabular distributed not &
              &yet supported"
         call fatal_error()
@@ -1532,6 +1572,7 @@ contains
                2*frac*(r1 - c_k))) - p_l_k)/frac
         end if
       else
+        call write_particle_restart()
         message = "Unknown interpolation type: " // trim(to_str(INTT))
         call fatal_error()
       end if
@@ -1573,6 +1614,7 @@ contains
         ! check for large number of rejections
         n_sample = n_sample + 1
         if (n_sample == MAX_SAMPLE) then
+          call write_particle_restart()
           message = "Too many rejections on Maxwell fission spectrum."
           call fatal_error()
         end if
@@ -1605,6 +1647,7 @@ contains
         ! check for large number of rejections
         n_sample = n_sample + 1
         if (n_sample == MAX_SAMPLE) then
+          call write_particle_restart()
           message = "Too many rejections on evaporation spectrum."
           call fatal_error()
         end if
@@ -1646,6 +1689,7 @@ contains
         ! check for large number of rejections
         n_sample = n_sample + 1
         if (n_sample == MAX_SAMPLE) then
+          call write_particle_restart()
           message = "Too many rejections on Watt spectrum."
           call fatal_error()
         end if
@@ -1656,6 +1700,7 @@ contains
       ! KALBACH-MANN CORRELATED SCATTERING
 
       if (.not. present(mu_out)) then
+        call write_particle_restart()
         message = "Law 44 called without giving mu_out as argument."
         call fatal_error()
       end if
@@ -1664,6 +1709,7 @@ contains
       NR = int(edist % data(1))
       NE = int(edist % data(2 + 2*NR))
       if (NR > 0) then
+        call write_particle_restart()
         message = "Multiple interpolation regions not supported while &
              &attempting to sample Kalbach-Mann distribution."
         call fatal_error()
@@ -1724,6 +1770,7 @@ contains
 
       if (ND > 0) then
         ! discrete lines present
+        call write_particle_restart()
         message = "Discrete lines in continuous tabular distributed not &
              &yet supported"
         call fatal_error()
@@ -1779,6 +1826,7 @@ contains
         KM_R = R_k + (R_k1 - R_k)*(E_out - E_l_k)/(E_l_k1 - E_l_k)
         KM_A = A_k + (A_k1 - A_k)*(E_out - E_l_k)/(E_l_k1 - E_l_k)
       else
+        call write_particle_restart()
         message = "Unknown interpolation type: " // trim(to_str(INTT))
         call fatal_error()
       end if
@@ -1805,6 +1853,7 @@ contains
       ! CORRELATED ENERGY AND ANGLE DISTRIBUTION
 
       if (.not. present(mu_out)) then
+        call write_particle_restart()
         message = "Law 44 called without giving mu_out as argument."
         call fatal_error()
       end if
@@ -1813,6 +1862,7 @@ contains
       NR = int(edist % data(1))
       NE = int(edist % data(2 + 2*NR))
       if (NR > 0) then
+        call write_particle_restart()
         message = "Multiple interpolation regions not supported while &
              &attempting to sample correlated energy-angle distribution."
         call fatal_error()
@@ -1873,6 +1923,7 @@ contains
 
       if (ND > 0) then
         ! discrete lines present
+        call write_particle_restart()
         message = "Discrete lines in continuous tabular distributed not &
              &yet supported"
         call fatal_error()
@@ -1915,6 +1966,7 @@ contains
                2*frac*(r1 - c_k))) - p_l_k)/frac
         end if
       else
+        call write_particle_restart()
         message = "Unknown interpolation type: " // trim(to_str(INTT))
         call fatal_error()
       end if
@@ -1978,6 +2030,7 @@ contains
           mu_out = mu_k + (sqrt(p_k*p_k + 2*frac*(r3 - c_k))-p_k)/frac
         end if
       else
+        call write_particle_restart()
         message = "Unknown interpolation type: " // trim(to_str(JJ))
         call fatal_error()
       end if

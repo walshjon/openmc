@@ -78,9 +78,13 @@ contains
       cmfd%egrid = (/0.0_8,20.0_8/)
       cmfd % indices(4) = 1 ! one energy group
     end if
-
+    
     ! set global albedo
-    cmfd % albedo = mesh_ % albedo
+    if (associated(mesh_ % albedo)) then
+      cmfd % albedo = mesh_ % albedo
+    else
+      cmfd % albedo = (/1.0, 1.0, 1.0, 1.0, 1.0, 1.0/)
+    end if
 
     ! get acceleration map
     if (associated(mesh_ % map)) then
@@ -121,7 +125,7 @@ contains
     if (run_2grp_ == 'true' .or. run_2grp_ == '1') cmfd_run_2grp = .true.
 
     ! set the solver type
-    cmfd_solver_type = solver_
+    cmfd_solver_type = solver_(1:10)
 
     ! set monitoring 
     call lower_case(snes_monitor_)

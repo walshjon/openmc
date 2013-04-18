@@ -8,11 +8,11 @@ module constants
   ! OpenMC major, minor, and release numbers
   integer, parameter :: VERSION_MAJOR   = 0
   integer, parameter :: VERSION_MINOR   = 5
-  integer, parameter :: VERSION_RELEASE = 0
+  integer, parameter :: VERSION_RELEASE = 1
 
   ! Revision numbers for binary files
   integer, parameter :: REVISION_SOURCE     = 1
-  integer, parameter :: REVISION_STATEPOINT = 7
+  integer, parameter :: REVISION_STATEPOINT = 8
 
   ! ============================================================================
   ! ADJUSTABLE PARAMETERS 
@@ -112,12 +112,7 @@ module constants
        SURF_SPHERE =  8, & ! Sphere
        SURF_CONE_X =  9, & ! Cone parallel to x-axis
        SURF_CONE_Y = 10, & ! Cone parallel to y-axis
-       SURF_CONE_Z = 11, & ! Cone parallel to z-axis
-       SURF_BOX_X  = 12, & ! Box extending infinitely in x-direction
-       SURF_BOX_Y  = 13, & ! Box extending infinitely in y-direction
-       SURF_BOX_Z  = 14, & ! Box extending infinitely in z-direction
-       SURF_BOX    = 15, & ! Rectangular prism
-       SURF_GQ     = 16    ! General quadratic surface
+       SURF_CONE_Z = 11    ! Cone parallel to z-axis
 
   ! ============================================================================
   ! CROSS SECTION RELATED CONSTANTS
@@ -301,11 +296,12 @@ module constants
        OUT_TOP   = 6
 
   ! Global tallY parameters
-  integer, parameter :: N_GLOBAL_TALLIES = 3
+  integer, parameter :: N_GLOBAL_TALLIES = 4
   integer, parameter :: &
        K_COLLISION   = 1, &
-       K_TRACKLENGTH = 2, &
-       LEAKAGE       = 3
+       K_ABSORPTION  = 2, &
+       K_TRACKLENGTH = 3, &
+       LEAKAGE       = 4
 
   ! ============================================================================
   ! EXTERNAL SOURCE PARAMETERS
@@ -350,16 +346,18 @@ module constants
        MODE_FIXEDSOURCE = 1, & ! Fixed source mode
        MODE_EIGENVALUE  = 2, & ! K eigenvalue mode
        MODE_PLOTTING    = 3, & ! Plotting mode
-       MODE_TALLIES     = 4    ! Tally results mode
+       MODE_TALLIES     = 4, & ! Tally results mode
+       MODE_PARTICLE    = 5    ! Particle restart mode
 
   ! Unit numbers
-  integer, parameter :: UNIT_SUMMARY = 11 ! unit # for writing summary file
-  integer, parameter :: UNIT_TALLY   = 12 ! unit # for writing tally file
-  integer, parameter :: UNIT_PLOT    = 13 ! unit # for writing plot file
-  integer, parameter :: UNIT_XS      = 14 ! unit # for writing xs summary file
-  integer, parameter :: UNIT_SOURCE  = 15 ! unit # for writing source file
-  integer, parameter :: UNIT_STATE   = 16 ! unit # for writing state point
-  integer, parameter :: CMFD_BALANCE = 17 ! unit # for writing cmfd balance file
+  integer, parameter :: UNIT_SUMMARY  = 11 ! unit # for writing summary file
+  integer, parameter :: UNIT_TALLY    = 12 ! unit # for writing tally file
+  integer, parameter :: UNIT_PLOT     = 13 ! unit # for writing plot file
+  integer, parameter :: UNIT_XS       = 14 ! unit # for writing xs summary file
+  integer, parameter :: UNIT_SOURCE   = 15 ! unit # for writing source file
+  integer, parameter :: UNIT_STATE    = 16 ! unit # for writing state point
+  integer, parameter :: CMFD_BALANCE  = 17 ! unit # for writing cmfd balance file
+  integer, parameter :: UNIT_PARTICLE = 18 ! unit # for writing particle restart
 
   !=============================================================================
   ! CMFD CONSTANTS
