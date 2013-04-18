@@ -1131,6 +1131,11 @@ contains
       call h5ltmake_dataset_double_f(cmfd_group, "cmfd_src", 4, &
            dims4, cmfd % cmfd_src, hdf5_err)
 
+      ! write out diff coef
+      dims4 = shape(cmfd % diffcof)
+      call h5ltmake_dataset_double_f(cmfd_group, "diff_coef", 4, &
+           dims4, cmfd % diffcof, hdf5_err)
+
       ! write out keff
       call hdf5_write_double(cmfd_group, "cmfd_keff", cmfd % keff) 
 
