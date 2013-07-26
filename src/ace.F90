@@ -127,6 +127,12 @@ contains
                &match any nuclide on material " // trim(to_str(mat % id))
           call fatal_error()
         end if
+
+        ! See if S(a,b) table has SCT physics active
+        if (mat % sct(k)) then
+          nuclides(mat % nuclide(mat % i_sab_nuclides(k))) % sct = .true.
+          call nuclides(mat % nuclide(mat % i_sab_nuclides(k))) % calc_kTeff()
+        end if
       end do ASSIGN_SAB
 
       ! If there are multiple S(a,b) tables, we need to make sure that the
@@ -159,13 +165,14 @@ contains
           mat % i_sab_tables(m)   = temp_table
         end do SORT_SAB
       end if
-      
+
       ! Deallocate temporary arrays for names of nuclides and S(a,b) tables
       if (allocated(mat % names)) deallocate(mat % names)
       if (allocated(mat % sab_names)) deallocate(mat % sab_names)
+      if (allocated(mat % sct)) deallocate(mat % sct)
 
     end do MATERIAL_LOOP2
-    
+
     ! Avoid some valgrind leak errors
     call already_read % clear()
     

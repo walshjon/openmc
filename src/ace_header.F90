@@ -137,10 +137,15 @@ module ace_header
     ! Reactions
     integer :: n_reaction ! # of reactions
     type(Reaction), pointer :: reactions(:) => null()
+
+    ! SCT physics for this nuclide
+    logical :: sct = .false.
+    real(8) :: kTeff
     
     ! Type-Bound procedures
     contains
       procedure :: clear => nuclide_clear ! Deallocates Nuclide
+      procedure :: calc_kTeff => nuclide_calc_kTeff ! calculates kTeff
   end type Nuclide
 
 !===============================================================================
@@ -359,5 +364,51 @@ module ace_header
       end if
       
     end subroutine nuclide_clear    
+
+!===============================================================================
+! NUCLIDE_CALC_KTEFF compute the effective temperature for H-H2O
+!===============================================================================
+
+    subroutine nuclide_calc_kTeff(this)
+
+      class(Nuclide) :: this
+
+      integer :: i
+      integer, parameter :: N = 11
+      real(8) :: kT(N) =  (/ 2.530000000000000e-8_8, &
+                             2.788568764640000e-8_8, &
+                             3.219435384640000e-8_8, &
+                             3.650302004640000e-8_8, &
+                             4.081168624640001e-8_8, &
+                             4.512035244640000e-8_8, &
+                             4.942901864640000e-8_8, &
+                             5.373768484640000e-8_8, &
+                             5.804635104640001e-8_8, &
+                             6.893865920000000e-8_8, &
+                             8.617332400000000e-8_8 /)
+
+      real(8) :: kTeff(N)  = (/ 1.117719716274400e-7_8, &
+                                1.120882277265200e-7_8, &
+                                1.127888168506400e-7_8, &
+                                1.138487487358400e-7_8, &
+                                1.152309688528000e-7_8, &
+                                1.167295229571600e-7_8, &
+                                1.184814266340800e-7_8, &
+                                1.203436321657200e-7_8, &
+                                1.212493138009600e-7_8, &
+                                1.282569285086400e-7_8, &
+                                1.386072064542800e-7_8 /)
+
+      ! Begin linear search and perform linear interpolation
+      do i = 1, N
+        if (this % kT <= kT(i)) then
+          print *, i
+          this % kTeff = kTeff(i-1) + (kTeff(i) - kTeff(i-1))/(kT(i) - kT(i-1)) &
+                       * (this % kT - kT(i-1))
+          exit
+        end if
+      end do
+
+    end subroutine nuclide_calc_kTeff
 
 end module ace_header

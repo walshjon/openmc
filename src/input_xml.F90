@@ -1300,9 +1300,13 @@ contains
         allocate(mat % sab_names(n_sab))
         allocate(mat % i_sab_nuclides(n_sab))
         allocate(mat % i_sab_tables(n_sab))
+        allocate(mat % sct(n_sab))
 
         ! Initialize i_sab_nuclides
         mat % i_sab_nuclides = NONE
+
+        ! Set all sct to false
+        mat % sct = .false.
 
         do j = 1, n_sab
           ! Get pointer to S(a,b) table
@@ -1311,6 +1315,9 @@ contains
           ! Determine name of S(a,b) table
           name = trim(sab % name) // "." // trim(sab % xs)
           mat % sab_names(j) = name
+
+          ! Check if SCT physics are on
+          if (sab % sct == 'true' .or. sab % sct == '1') mat % sct = .true.
 
           ! Check that this nuclide is listed in the cross_sections.xml file
           if (.not. xs_listing_dict % has_key(name)) then

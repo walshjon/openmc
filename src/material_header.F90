@@ -21,6 +21,7 @@ module material_header
     ! Temporary names read during initialization
     character(12), allocatable :: names(:)     ! isotope names
     character(12), allocatable :: sab_names(:) ! name of S(a,b) table
+    logical,       allocatable :: sct(:)       ! sct on for this S(a,b) table
   end type Material
 
 end module material_header
