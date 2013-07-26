@@ -529,6 +529,7 @@ contains
     integer, intent(in)     :: i_nuclide
     type(Reaction), pointer :: rxn
 
+    logical :: sct     ! perform sct physics
     real(8) :: awr     ! atomic weight ratio of target
     real(8) :: mu      ! cosine of polar angle
     real(8) :: vel     ! magnitude of velocity
@@ -539,6 +540,7 @@ contains
     real(8) :: v       ! y-direction
     real(8) :: w       ! z-direction
     real(8) :: E       ! energy
+    real(8) :: kT      ! equilibrium temperature of target in MeV
     type(Nuclide), pointer :: nuc => null()
 
     ! get pointer to nuclide
@@ -550,45 +552,65 @@ contains
     ! Neutron velocity in LAB
     v_n = vel * p % coord0 % uvw
 
-    ! Sample velocity of target nucleus
-    if (.not. micro_xs(i_nuclide) % use_ptable) then
-      call sample_target_velocity(nuc, v_t)
+    ! Check SCT
+    sct = nuc % sct
+    if (sct) then
+      kT = nuc % kTeff
     else
-      v_t = ZERO
+      kT = nuc % kT
     end if
 
-    ! Velocity of center-of-mass
-    v_cm = (v_n + awr*v_t)/(awr + ONE)
+    do
+      ! Sample velocity of target nucleus
+      if (.not. micro_xs(i_nuclide) % use_ptable) then
+        call sample_target_velocity(nuc, v_t, kT)
+      else
+        v_t = ZERO
+      end if
 
-    ! Transform to CM frame
-    v_n = v_n - v_cm
+      ! Velocity of center-of-mass
+      v_cm = (v_n + awr*v_t)/(awr + ONE)
 
-    ! Find speed of neutron in CM
-    vel = sqrt(dot_product(v_n, v_n))
+      ! Transform to CM frame
+      v_n = v_n - v_cm
 
-    ! Sample scattering angle
-    mu = sample_angle(rxn, p % E)
+      ! Find speed of neutron in CM
+      vel = sqrt(dot_product(v_n, v_n))
 
-    ! Determine direction cosines in CM
-    u = v_n(1)/vel
-    v = v_n(2)/vel
-    w = v_n(3)/vel
+      ! Sample scattering angle
+      mu = sample_angle(rxn, p % E)
 
-    ! Change direction cosines according to mu
-    call rotate_angle(u, v, w, mu)
+      ! Determine direction cosines in CM
+      u = v_n(1)/vel
+      v = v_n(2)/vel
+      w = v_n(3)/vel
 
-    ! Rotate neutron velocity vector to new angle -- note that the speed of the
-    ! neutron in CM does not change in elastic scattering. However, the speed
-    ! will change when we convert back to LAB
-    v_n = vel * (/ u, v, w /)
+      ! Change direction cosines according to mu
+      call rotate_angle(u, v, w, mu)
 
-    ! Transform back to LAB frame
-    v_n = v_n + v_cm
+      ! Rotate neutron velocity vector to new angle -- note that the speed of the
+      ! neutron in CM does not change in elastic scattering. However, the speed
+      ! will change when we convert back to LAB
+      v_n = vel * (/ u, v, w /)
 
-    E = dot_product(v_n, v_n)
+      ! Transform back to LAB frame
+      v_n = v_n + v_cm
+
+      ! Calculate new energy
+      E = dot_product(v_n, v_n)
+
+      ! Perform SCT rejection if SCT physics are active and upscatter occurred
+      if (.not. sct .or. E < p % E) then
+        exit
+      else
+        if (prn() < exp(-(E - p%E)*(ONE/nuc % kT - ONE/nuc % kTeff))) exit 
+      end if
+    end do
+
+    ! Calculate velocity
     vel = sqrt(E)
 
-    ! compute cosine of scattering angle in LAB frame by taking dot product of
+    ! Compute cosine of scattering angle in LAB frame by taking dot product of
     ! neutron's pre- and post-collision angle
     mu = dot_product(p % coord0 % uvw, v_n) / vel
 
@@ -771,13 +793,13 @@ contains
 ! for this method can be found in FRA-TM-123.
 !===============================================================================
 
-  subroutine sample_target_velocity(nuc, v_target)
+  subroutine sample_target_velocity(nuc, v_target, kT)
 
     type(Nuclide),  pointer :: nuc
     real(8), intent(out)    :: v_target(3)
+    real(8) :: kT
 
     real(8) :: u, v, w     ! direction of target 
-    real(8) :: kT          ! equilibrium temperature of target in MeV
     real(8) :: alpha       ! probability of sampling f2 over f1
     real(8) :: mu          ! cosine of angle between neutron and target vel
     real(8) :: r1, r2      ! pseudo-random numbers
@@ -787,9 +809,6 @@ contains
     real(8) :: beta_vt     ! beta * speed of target
     real(8) :: beta_vt_sq  ! (beta * speed of target)^2
     real(8) :: vt          ! speed of target
-
-    ! Determine equilibrium temperature in MeV
-    kT = nuc % kT
 
     ! Check if energy is above threshold
     if (p % E >= FREE_GAS_THRESHOLD * kT .and. nuc % awr > ONE) then
