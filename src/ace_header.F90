@@ -402,7 +402,6 @@ module ace_header
       ! Begin linear search and perform linear interpolation
       do i = 1, N
         if (this % kT <= kT(i)) then
-          print *, i
           this % kTeff = kTeff(i-1) + (kTeff(i) - kTeff(i-1))/(kT(i) - kT(i-1)) &
                        * (this % kT - kT(i-1))
           exit
