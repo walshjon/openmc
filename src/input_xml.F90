@@ -1317,7 +1317,7 @@ contains
           mat % sab_names(j) = name
 
           ! Check if SCT physics are on
-          if (sab % sct == 'true' .or. sab % sct == '1') mat % sct = .true.
+          if (sab % sct == 'true' .or. sab % sct == '1') mat % sct(j) = .true.
 
           ! Check that this nuclide is listed in the cross_sections.xml file
           if (.not. xs_listing_dict % has_key(name)) then
