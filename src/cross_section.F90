@@ -186,9 +186,6 @@ contains
           & nuc % hash_indices(i_hash_low + 1) + 1 &
           & - nuc % hash_indices(i_hash_low) + 1, E)
       end if
-
-      i_grid = binary_search(nuc % energy, nuc % n_grid, E)
-
     end select
 
     ! check for rare case where two energy points are the same
