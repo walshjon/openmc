@@ -1,11 +1,97 @@
 module energy_grid
 
+  use ace_header,       only: Nuclide
   use constants,        only: MAX_LINE_LEN
   use global
   use list_header,      only: ListReal
   use output,           only: write_message
+  use search,           only: binary_search
+
+  implicit none
+
+  ! number of unionized global energy grid hash bins
+  integer :: n_hash_bins
+
+  ! indices on unionized global grid for hash bin boundaries
+  integer, allocatable :: hash_indices(:)
+
+  ! maximum energy on unionized global energy grid
+  real(8) :: E_grid_max
+
+  ! global hash table bin width in lethargy
+  real(8) :: du_hash
+
+  ! global hash table bin width in energy
+  real(8) :: dE_hash
 
 contains
+
+!===============================================================================
+! HASH_TABLE creates an energy hash table to accelerate searches on cross
+! section energy grids (globally unionized or nuclide-specific)
+!===============================================================================
+
+  subroutine hash_table()
+
+    type(Nuclide), pointer :: nuc => null()
+    real(8), allocatable   :: e_loc(:)  ! energy bounds on the hash bins
+    real(8)                :: E_min_loc ! minimum energy of the grid
+    integer                :: i ! hash bin loop index
+    integer                :: j ! nuclide loop index
+    integer                :: k ! material loop index
+
+    select case(grid_method)
+    case(GRID_UNION)
+      allocate(e_loc(n_hash_bins + 1))
+      allocate(hash_indices(n_hash_bins + 1))
+      E_min_loc  = e_grid(1)
+      E_grid_max = e_grid(n_grid)
+      du_hash = log(E_grid_max / E_min_loc) / dble(n_hash_bins)
+      dE_hash = (E_grid_max - E_min_loc) / dble(n_hash_bins)
+      select case(hash_spacing)
+      case(LETHARGY)
+        e_loc = E_grid_max / exp((/(dble(i) * du_hash, &
+          & i = n_hash_bins, 0, -1)/))
+      case(ENERGY)
+        e_loc = E_min_loc + (/(dble(i) * dE_hash, i = 0, n_hash_bins)/)
+      end select
+      hash_indices(1) = 1
+      hash_indices(n_hash_bins + 1) = n_grid - 1
+      do i = 2, n_hash_bins
+        hash_indices(i) = binary_search(e_grid, n_grid, e_loc(i))
+      end do
+      deallocate(e_loc)
+
+    case(GRID_NUCLIDE)
+      do j = 1, n_nuclides_total
+        nuc => nuclides(j)
+        nuc % n_hash_bins = n_hash_bins
+        allocate(e_loc(nuc % n_hash_bins + 1))
+        allocate(nuc % hash_indices(nuc % n_hash_bins + 1))
+        E_min_loc = nuc % energy(1)
+        nuc % E_grid_max = nuc % energy(nuc % n_grid)
+        nuc % du_hash = log(nuc % E_grid_max / E_min_loc) &
+          & / dble(nuc % n_hash_bins)
+        nuc % dE_hash = (nuc % E_grid_max - E_min_loc) &
+          & / dble(nuc % n_hash_bins)
+        select case(hash_spacing)
+        case(LETHARGY)
+          e_loc = nuc % E_grid_max / exp((/(dble(i) * nuc % du_hash, &
+            & i = nuc % n_hash_bins, 0, -1)/))
+        case(ENERGY)
+          e_loc = E_min_loc + (/(dble(i) * nuc % dE_hash, &
+            & i = 0, nuc % n_hash_bins)/)
+        end select
+        nuc % hash_indices(1) = 1
+        nuc % hash_indices(nuc % n_hash_bins + 1) = nuc % n_grid - 1
+        do i = 2, nuc % n_hash_bins
+          nuc % hash_indices(i) = &
+            & binary_search(nuc % energy, nuc % n_grid, e_loc(i))
+        end do
+        deallocate(e_loc)
+      end do
+    end select
+  end subroutine hash_table
 
 !===============================================================================
 ! UNIONIZED_GRID creates a single unionized energy grid combined from each

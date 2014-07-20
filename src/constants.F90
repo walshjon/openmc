@@ -386,6 +386,11 @@ module constants
        GRID_UNION    = 2, & ! union grid with pointers
        GRID_LETHARGY = 3    ! lethargy mapping
 
+  ! Energy hash table spacing
+  integer, parameter :: &
+       LETHARGY = 1, & ! constant lethargy hash bin spacing
+       ENERGY   = 2    ! constant energy hash bin spacing
+
   ! Running modes
   integer, parameter ::        &
        MODE_FIXEDSOURCE = 1, & ! Fixed source mode

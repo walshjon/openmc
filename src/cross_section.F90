@@ -2,6 +2,8 @@ module cross_section
 
   use ace_header,      only: Nuclide, SAlphaBeta, Reaction, UrrData
   use constants
+  use energy_grid,     only: E_grid_max, dE_hash, du_hash, hash_indices, &
+                             n_hash_bins
   use error,           only: fatal_error
   use fission,         only: nu_total
   use global
@@ -141,8 +143,9 @@ contains
     integer, intent(in) :: i_sab     ! index into sab_tables array
     real(8), intent(in) :: E         ! energy
 
-    integer :: i_grid ! index on nuclide energy grid
-    real(8) :: f      ! interp factor on nuclide energy grid
+    integer :: i_grid     ! index on nuclide energy grid
+    integer :: i_hash_low ! energy grid index for hash bin lower boundary
+    real(8) :: f          ! interp factor on nuclide energy grid
     type(Nuclide), pointer, save :: nuc => null()
 !$omp threadprivate(nuc)
 
@@ -162,13 +165,29 @@ contains
       ! the nuclide energy grid in order to determine which points to
       ! interpolate between
 
-      if (E < nuc % energy(1)) then
+      select case(hash_spacing)
+      case (LETHARGY)
+        i_hash_low = nuc % n_hash_bins + 1 &
+          & - ceiling(log(nuc % E_grid_max / E) / nuc % du_hash)
+      case (ENERGY)
+        i_hash_low = 1 + floor(E / nuc % dE_hash)
+      case default
+        i_hash_low = 1
+      end select
+
+      if (E <= nuc % energy(1)) then
         i_grid = 1
       elseif (E > nuc % energy(nuc % n_grid)) then
         i_grid = nuc % n_grid - 1
       else
-        i_grid = binary_search(nuc % energy, nuc % n_grid, E)
+        i_grid = nuc % hash_indices(i_hash_low) - 1 + binary_search &
+          & (nuc % energy(nuc % hash_indices(i_hash_low) : &
+          & nuc % hash_indices(i_hash_low + 1) + 1), &
+          & nuc % hash_indices(i_hash_low + 1) + 1 &
+          & - nuc % hash_indices(i_hash_low) + 1, E)
       end if
+
+      i_grid = binary_search(nuc % energy, nuc % n_grid, E)
 
     end select
 
@@ -467,16 +486,28 @@ contains
 
   subroutine find_energy_index(E)
 
-    real(8), intent(in) :: E ! energy of particle
+    real(8), intent(in) :: E          ! energy of particle
+    integer             :: i_hash_low ! energy grid index of lower hash bound
+
+    select case(hash_spacing)
+    case (LETHARGY)
+      i_hash_low = n_hash_bins + 1 - ceiling(log(E_grid_max / E) / du_hash)
+    case (ENERGY)
+      i_hash_low = 1 + floor(E / dE_hash)
+    case default
+      i_hash_low = 1
+    end select
 
     ! if particle's energy is outside of energy grid range, set to first or last
     ! index. Otherwise, do a binary search through the union energy grid.
-    if (E < e_grid(1)) then
+    if (E <= e_grid(1)) then
       union_grid_index = 1
     elseif (E > e_grid(n_grid)) then
       union_grid_index = n_grid - 1
     else
-      union_grid_index = binary_search(e_grid, n_grid, E)
+      union_grid_index = hash_indices(i_hash_low) - 1 + binary_search &
+        & (e_grid(hash_indices(i_hash_low):hash_indices(i_hash_low + 1) + 1), &
+        & hash_indices(i_hash_low + 1) + 1 - hash_indices(i_hash_low) + 1, E)
     end if
 
   end subroutine find_energy_index

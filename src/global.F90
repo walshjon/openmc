@@ -82,6 +82,9 @@ module global
   integer :: n_grid      ! number of points on unionized grid
   real(8), allocatable :: e_grid(:) ! energies on unionized grid
 
+  ! Energy hash table info
+  integer :: hash_spacing ! scheme for spacing of energy hash bins
+
   ! Unreoslved resonance probablity tables
   logical :: urr_ptables_on = .true.
 

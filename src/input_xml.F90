@@ -3,6 +3,7 @@ module input_xml
   use cmfd_input,       only: configure_cmfd
   use constants
   use dict_header,      only: DictIntInt, ElemKeyValueCI
+  use energy_grid,      only: n_hash_bins, hash_spacing
   use error,            only: fatal_error, warning
   use geometry_header,  only: Cell, Surface, Lattice
   use global
@@ -71,6 +72,7 @@ contains
     type(Node), pointer :: node_sp      => null()
     type(Node), pointer :: node_output  => null()
     type(Node), pointer :: node_verb    => null()
+    type(Node), pointer :: node_e_hash  => null()
 
     ! Display output message
     message = "Reading settings XML file..."
@@ -811,6 +813,39 @@ contains
         message = "Unknown natural element expansion option: " // trim(temp_str)
         call fatal_error()
       end select
+    end if
+
+    ! energy grid hash table setup
+    n_hash_bins = 1
+    hash_spacing = LETHARGY
+
+    if (check_for_node(doc, "energy_grid_hash")) then
+      ! Get pointer to energy grid hash table node
+      call get_node_ptr(doc, "energy_grid_hash", node_e_hash)
+
+      ! Check to make sure exactly one value was specified
+      if (get_arraysize_integer(node_e_hash, "n_bins") /= 1) then
+        message = "Must specifiy exactly one integral number of hash bins."
+        call fatal_error()
+      end if
+
+      ! Get number of energy hash table bins to use
+      if (check_for_node(node_e_hash, "n_bins")) &
+        & call get_node_value(node_e_hash, "n_bins", n_hash_bins)
+
+      ! Check for hash table spacing specification
+      if (check_for_node(node_e_hash, "spacing")) then
+        call get_node_value(node_e_hash, "spacing", temp_str)
+        call lower_case(temp_str)
+        if (trim(temp_str) == 'energy') then
+          hash_spacing = ENERGY
+        else if (trim(temp_str) == 'lethargy') then
+          continue
+        else
+          message = "Not a valid hash table energy spacing specification"
+          call fatal_error()
+        end if
+      end if
     end if
 
     ! Close settings XML file

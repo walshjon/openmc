@@ -100,6 +100,13 @@ module ace_header
     integer, allocatable :: grid_index(:) ! pointers to union grid
     real(8), allocatable :: energy(:)     ! energy values corresponding to xs
 
+    ! Energy hashing information
+    integer              :: n_hash_bins     ! # of nuclide energy grid hash bins
+    integer, allocatable :: hash_indices(:) ! E grid indices for hash energies
+    real(8)              :: E_grid_max      ! max energy on nuclide grid
+    real(8)              :: du_hash         ! hash bin width in lethargy
+    real(8)              :: dE_hash         ! hash bin width in energy
+
     ! Microscopic cross sections
     real(8), allocatable :: total(:)      ! total cross section
     real(8), allocatable :: elastic(:)    ! elastic scattering
@@ -339,6 +346,9 @@ module ace_header
 
       if (allocated(this % grid_index)) &
            deallocate(this % grid_index)
+
+      if (allocated(this % hash_indices)) &
+        deallocate(this % hash_indices)
 
       if (allocated(this % energy)) &
            deallocate(this % total, this % elastic, this % fission,  &
