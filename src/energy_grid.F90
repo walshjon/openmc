@@ -24,8 +24,6 @@ module energy_grid
   ! global hash table bin width in energy
   real(8) :: dE_hash
 
-  implicit none
-
 contains
 
 !===============================================================================

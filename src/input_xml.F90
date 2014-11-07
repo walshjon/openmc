@@ -886,8 +886,7 @@ contains
 
       ! Check to make sure exactly one value was specified
       if (get_arraysize_integer(node_e_hash, "n_bins") /= 1) then
-        message = "Must specifiy exactly one integral number of hash bins."
-        call fatal_error()
+        call fatal_error("Must specifiy exactly one integral number of hash bins.")
       end if
 
       ! Get number of energy hash table bins to use
@@ -897,14 +896,12 @@ contains
       ! Check for hash table spacing specification
       if (check_for_node(node_e_hash, "spacing")) then
         call get_node_value(node_e_hash, "spacing", temp_str)
-        call lower_case(temp_str)
-        if (trim(temp_str) == 'energy') then
+        if (trim(to_lower(temp_str)) == 'energy') then
           hash_spacing = ENERGY
         else if (trim(temp_str) == 'lethargy') then
           continue
         else
-          message = "Not a valid hash table energy spacing specification"
-          call fatal_error()
+          call fatal_error("Not a valid hash table energy spacing specification")
         end if
       end if
     end if
