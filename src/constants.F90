@@ -339,6 +339,13 @@ module constants
        SRC_SPACE_POINT   = 2, & ! Source at a single point
        SRC_SPACE_FISSION = 3    ! Source in prism filtered by fissionable mats
 
+  ! Source spatial distribution functions
+  integer, parameter :: &
+    SRC_DIST_UNIFORM      = 1, & ! Uniform source distribution
+    SRC_DIST_COSINE       = 2, & ! Cosine source distribution
+    SRC_DIST_EXPONENTIAL  = 3, & ! Exponential source distribution
+    SRC_DIST_LINEAR       = 4    ! Linear source distribution
+
   ! Source angular distribution types
   integer, parameter :: &
        SRC_ANGLE_ISOTROPIC = 1, & ! Isotropic angular

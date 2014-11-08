@@ -9,6 +9,7 @@ module source_header
 
   type ExtSource
     integer :: type_space              ! spacial distribution, e.g. 'box' or 'point'
+    integer :: src_dist_xyz(3)         ! distribution functions by dimension
     integer :: type_angle              ! angle distribution, e.g. 'isotropic'
     integer :: type_energy             ! energy distribution, e.g. 'Watt'
     real(8), allocatable :: params_space(:)  ! parameters for spatial distribution

@@ -65,6 +65,7 @@ contains
     type(Node), pointer :: node_mode      => null()
     type(Node), pointer :: node_source    => null()
     type(Node), pointer :: node_dist      => null()
+    type(Node), pointer :: node_dist_func => null()
     type(Node), pointer :: node_cutoff    => null()
     type(Node), pointer :: node_entropy   => null()
     type(Node), pointer :: node_ufs       => null()
@@ -313,6 +314,21 @@ contains
               // trim(type)
           call fatal_error()
         end select
+
+        if (to_lower(type) == 'box' .or. to_lower(type) == 'fission') then
+          if (check_for_node(node_dist, "x_distribution")) then
+            call get_node_value(node_dist, "x_distribution", temp_str)
+            src_dist_xyz(1) = src_dist_function(temp_str)
+          end if
+          if (check_for_node(node_dist, "y_distribution")) then
+            call get_node_value(node_dist, "y_distribution", temp_str)
+            src_dist_xyz(2) = src_dist_function(temp_str)
+          end if
+          if (check_for_node(node_dist, "z_distribution")) then
+            call get_node_value(node_dist, "z_distribution", temp_str)
+            src_dist_xyz(3) = src_dist_function(temp_str)
+          end if
+        end if
 
         ! Determine number of parameters specified
         if (check_for_node(node_dist, "parameters")) then
