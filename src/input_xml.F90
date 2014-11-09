@@ -11,6 +11,7 @@ module input_xml
   use output,           only: write_message
   use plot_header
   use random_lcg,       only: prn
+  use source,           only: src_dist_function
   use string,           only: to_lower, to_str, str_to_int, str_to_real, &
                               starts_with, ends_with
   use tally_header,     only: TallyObject, TallyFilter
@@ -316,17 +317,18 @@ contains
         end select
 
         if (to_lower(type) == 'box' .or. to_lower(type) == 'fission') then
+          src_dist_xyz = SRC_DIST_UNIFORM
           if (check_for_node(node_dist, "x_distribution")) then
             call get_node_value(node_dist, "x_distribution", temp_str)
-            src_dist_xyz(1) = src_dist_function(temp_str)
+            src_dist_xyz(1) = src_dist_function(to_lower(temp_str))
           end if
           if (check_for_node(node_dist, "y_distribution")) then
             call get_node_value(node_dist, "y_distribution", temp_str)
-            src_dist_xyz(2) = src_dist_function(temp_str)
+            src_dist_xyz(2) = src_dist_function(to_lower(temp_str))
           end if
           if (check_for_node(node_dist, "z_distribution")) then
             call get_node_value(node_dist, "z_distribution", temp_str)
-            src_dist_xyz(3) = src_dist_function(temp_str)
+            src_dist_xyz(3) = src_dist_function(to_lower(temp_str))
           end if
         end if
 

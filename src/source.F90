@@ -102,6 +102,7 @@ contains
     type(Bank), pointer :: site ! source site
 
     integer :: i          ! dummy loop index
+    integer :: j          ! Cartesian axis index
     real(8) :: r(3)       ! sampled coordinates
     real(8) :: phi        ! azimuthal angle
     real(8) :: mu         ! cosine of polar angle
@@ -127,11 +128,22 @@ contains
       ! Repeat sampling source location until a good site has been found
       found = .false.
       do while (.not.found)
-        ! Coordinates sampled uniformly over a box
-        p_min = external_source % params_space(1:3)
-        p_max = external_source % params_space(4:6)
-        r = (/ (prn(), i = 1,3) /)
-        site % xyz = p_min + r*(p_max - p_min)
+
+        ! loop over axes
+        do j = 1, 3
+          p_min = external_source % params_space(j)
+          p_max = external_source % params_space(3+j)
+          r = prn()
+          select case(src_dist_xyz(j))
+          case(SRC_DIST_UNIFORM)
+            site % xyz(j) = p_min + r * (p_max - p_min)
+          case(SRC_DIST_LINEAR)
+            site % xyz(j) = sqrt(r * p_max*p_max + p_min*p_min * (ONE - r))
+          case(SRC_DIST_COSINE)
+            site % xyz(j) = p_min &
+              & + (TWO * asin(TWO * r - ONE) + PI) / (TWO * PI) * (p_max - p_min)
+          end select
+        end do
 
         ! Fill p with needed data
         p % coord0 % xyz = site % xyz
@@ -157,11 +169,21 @@ contains
         ! Set particle defaults
         call p % initialize()
 
-        ! Coordinates sampled uniformly over a box
-        p_min = external_source % params_space(1:3)
-        p_max = external_source % params_space(4:6)
-        r = (/ (prn(), i = 1,3) /)
-        site % xyz = p_min + r*(p_max - p_min)
+        ! loop over axes
+        do j = 1, 3
+          p_min = external_source % params_space(j)
+          p_max = external_source % params_space(3+j)
+          r = prn()
+          select case(src_dist_xyz(j))
+          case(SRC_DIST_UNIFORM)
+            site % xyz(j) = p_min + r * (p_max - p_min)
+          case(SRC_DIST_LINEAR)
+            site % xyz(j) = sqrt(r * p_max*p_max + p_min*p_min * (ONE - r))
+          case(SRC_DIST_COSINE)
+            site % xyz(j) = p_min &
+              & + (TWO * asin(TWO * r - ONE) + PI) / (TWO * PI) * (p_max - p_min)
+          end select
+        end do
 
         ! Fill p with needed data
         p % coord0 % xyz = site % xyz
@@ -318,5 +340,32 @@ contains
     p % last_E      = src % E
 
   end subroutine copy_source_attributes
+
+!===============================================================================
+! SRC_DIST_FUNCTION translates the string from the user input to the
+! corresponding spatial source distribution
+!===============================================================================
+
+  function src_dist_function(inp) result(dist_func)
+
+    character(MAX_LINE_LEN) :: inp
+    integer :: dist_func
+
+    select case(trim(adjustl(inp)))
+    case('uniform')
+      dist_func = SRC_DIST_UNIFORM
+
+    case('linear')
+      dist_func = SRC_DIST_LINEAR
+
+    case('cosine')
+      dist_func = SRC_DIST_COSINE
+
+    case default
+      call fatal_error('Unknown spatial source distribution function')
+
+    end select
+
+  end function src_dist_function
 
 end module source
