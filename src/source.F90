@@ -101,11 +101,11 @@ contains
 
     integer :: i          ! dummy loop index
     integer :: j          ! Cartesian axis index
-    real(8) :: r(3)       ! sampled coordinates
+    real(8) :: r          ! sampled coordinates
     real(8) :: phi        ! azimuthal angle
     real(8) :: mu         ! cosine of polar angle
-    real(8) :: p_min(3)   ! minimum coordinates of source
-    real(8) :: p_max(3)   ! maximum coordinates of source
+    real(8) :: p_min      ! minimum coordinates of source
+    real(8) :: p_max      ! maximum coordinates of source
     real(8) :: a          ! Arbitrary parameter 'a'
     real(8) :: b          ! Arbitrary parameter 'b'
     logical :: found      ! Does the source particle exist within geometry?
@@ -132,7 +132,7 @@ contains
           p_min = external_source % params_space(j)
           p_max = external_source % params_space(3+j)
           r = prn()
-          select case(src_dist_xyz(j))
+          select case(external_source % src_dist_xyz(j))
           case(SRC_DIST_UNIFORM)
             site % xyz(j) = p_min + r * (p_max - p_min)
           case(SRC_DIST_LINEAR)
@@ -171,7 +171,7 @@ contains
           p_min = external_source % params_space(j)
           p_max = external_source % params_space(3+j)
           r = prn()
-          select case(src_dist_xyz(j))
+          select case(external_source % src_dist_xyz(j))
           case(SRC_DIST_UNIFORM)
             site % xyz(j) = p_min + r * (p_max - p_min)
           case(SRC_DIST_LINEAR)
