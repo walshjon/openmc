@@ -135,8 +135,6 @@ contains
           select case(external_source % src_dist_xyz(j))
           case(SRC_DIST_UNIFORM)
             site % xyz(j) = p_min + r * (p_max - p_min)
-          case(SRC_DIST_LINEAR)
-            site % xyz(j) = sqrt(r * p_max*p_max + p_min*p_min * (ONE - r))
           case(SRC_DIST_COSINE)
             site % xyz(j) = p_min &
               & + (TWO * asin(TWO * r - ONE) + PI) / (TWO * PI) * (p_max - p_min)
@@ -174,8 +172,6 @@ contains
           select case(external_source % src_dist_xyz(j))
           case(SRC_DIST_UNIFORM)
             site % xyz(j) = p_min + r * (p_max - p_min)
-          case(SRC_DIST_LINEAR)
-            site % xyz(j) = sqrt(r * p_max*p_max + p_min*p_min * (ONE - r))
           case(SRC_DIST_COSINE)
             site % xyz(j) = p_min &
               & + (TWO * asin(TWO * r - ONE) + PI) / (TWO * PI) * (p_max - p_min)
@@ -348,9 +344,6 @@ contains
     select case(trim(adjustl(inp)))
     case('uniform')
       dist_func = SRC_DIST_UNIFORM
-
-    case('linear')
-      dist_func = SRC_DIST_LINEAR
 
     case('cosine')
       dist_func = SRC_DIST_COSINE

@@ -342,8 +342,7 @@ module constants
   ! Source spatial distribution functions
   integer, parameter :: &
     SRC_DIST_UNIFORM      = 1, & ! Uniform source distribution
-    SRC_DIST_COSINE       = 2, & ! Cosine source distribution
-    SRC_DIST_LINEAR       = 3    ! Linear source distribution
+    SRC_DIST_COSINE       = 2    ! Cosine source distribution
 
   ! Source angular distribution types
   integer, parameter :: &
