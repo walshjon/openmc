@@ -53,6 +53,24 @@ contains
 
       ! Set the last point explicitly so that we don't have out-of-bounds issues
       nuc % grid_index(M) = size(nuc % energy) - 1
+
+      ! repeat all steps if nuclide is a resonant scattering
+      if (nuc % resonant) then
+        allocate(nuc % grid_index_0K(0:M))
+
+        ! Determine corresponding indices in nuclide grid to energies on
+        ! equal-logarithmic grid
+        j = 1
+        do k = 0, M - 1
+          do while (log(nuc % energy_0K(j + 1)/E_min) <= umesh(k))
+            j = j + 1
+          end do
+          nuc % grid_index_0K(k) = j
+        end do
+
+        ! Set the last point explicitly so that we don't have out-of-bounds issues
+        nuc % grid_index_0K(M) = size(nuc % energy_0K) - 1
+      end if
     end do
 
     deallocate(umesh)

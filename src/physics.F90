@@ -4,6 +4,7 @@ module physics
   use constants
   use cross_section,          only: elastic_xs_0K
   use endf,                   only: reaction_name
+  use energy_grid,            only: log_spacing
   use error,                  only: fatal_error, warning
   use fission,                only: nu_total, nu_delayed
   use global
@@ -766,17 +767,23 @@ contains
     real(8) :: p_mode  ! probability at most probable energy
     real(8) :: p_t     ! probability at trial target energy
     real(8) :: mu      ! cosine between neutron and target velocities
+    real(8) :: r       ! pseudorandom number variable
+    real(8) :: ktn1    ! kT^-1
 
     integer :: i_E_low ! 0K index to lowest practical relative energy
     integer :: i_E_up  ! 0K index to highest practical relative energy
     integer :: i_E_rel ! index to trial relative energy
+    integer :: i_low   ! lower index of hash bin
+    integer :: i_high  ! upper index of hash bin
+    integer :: u       ! index into logarithmic mapping array
 
     logical :: reject  ! resample if true
 
     character(80) :: sampling_scheme ! method of target velocity sampling
 
-    kT = nuc % kT
-    awr = nuc % awr
+    kT   = nuc % kT
+    kTn1 = ONE / kT
+    awr  = nuc % awr
 
     ! check if nuclide is a resonant scatterer
     if (nuc % resonant) then
@@ -824,9 +831,9 @@ contains
       wgt = wcf * wgt
 
     case ('dbrc')
-      E_red = sqrt((awr * E) / kT)
-      E_low = (((E_red - 4.0_8)**2) * kT) / awr
-      E_up  = (((E_red + 4.0_8)**2) * kT) / awr
+      E_red = sqrt((awr * E) * kTn1)
+      E_low = (((E_red - 4.0_8) * (E_red - 4.0_8)) * kT) / awr
+      E_up  = (((E_red + 4.0_8) * (E_red + 4.0_8)) * kT) / awr
 
       ! find lower and upper energy bound indices
       ! lower index
@@ -835,7 +842,15 @@ contains
       elseif (E_low > nuc % energy_0K(nuc % n_grid_0K)) then
         i_E_low = nuc % n_grid_0K - 1
       else
-        i_E_low = binary_search(nuc % energy_0K, nuc % n_grid_0K, E_low)
+        ! Determine bounding indices based on which equal log-spaced interval
+        ! the energy is in
+        u = int(log(E_low / 1.0e-11_8) / log_spacing)
+        i_low  = nuc % grid_index_0K(u)
+        i_high = nuc % grid_index_0K(u + 1) + 1
+
+        ! Perform binary search over reduced range
+        i_E_low = binary_search(nuc % energy_0K(i_low:i_high), &
+             i_high - i_low + 1, E_low) + i_low - 1
       end if
 
       ! upper index
@@ -844,7 +859,15 @@ contains
       elseif (E_up > nuc % energy_0K(nuc % n_grid_0K)) then
         i_E_up = nuc % n_grid_0K - 1
       else
-        i_E_up = binary_search(nuc % energy_0K, nuc % n_grid_0K, E_up)
+        ! Determine bounding indices based on which equal log-spaced interval
+        ! the energy is in
+        u = int(log(E_up / 1.0e-11_8) / log_spacing)
+        i_low  = nuc % grid_index_0K(u)
+        i_high = nuc % grid_index_0K(u + 1) + 1
+
+        ! Perform binary search over reduced range
+        i_E_up = binary_search(nuc % energy_0K(i_low:i_high), &
+             i_high - i_low + 1, E_up) + i_low - 1
       end if
 
       ! interpolate xs since we're not exactly at the energy indices
@@ -878,9 +901,9 @@ contains
       end do
 
     case ('ares')
-      E_red = sqrt((awr * E) / kT)
-      E_low = (((E_red - 4.0_8)**2) * kT) / awr
-      E_up  = (((E_red + 4.0_8)**2) * kT) / awr
+      E_red = sqrt((awr * E) * kTn1)
+      E_low = (((E_red - 4.0_8) * (E_red - 4.0_8)) * kT) / awr
+      E_up  = (((E_red + 4.0_8) * (E_red + 4.0_8)) * kT) / awr
 
       ! find lower and upper energy bound indices
       ! lower index
@@ -889,7 +912,15 @@ contains
       elseif (E_low > nuc % energy_0K(nuc % n_grid_0K)) then
         i_E_low = nuc % n_grid_0K - 1
       else
-        i_E_low = binary_search(nuc % energy_0K, nuc % n_grid_0K, E_low)
+        ! Determine bounding indices based on which equal log-spaced interval
+        ! the energy is in
+        u = int(log(E_low / 1.0e-11_8) / log_spacing)
+        i_low  = nuc % grid_index_0K(u)
+        i_high = nuc % grid_index_0K(u + 1) + 1
+
+        ! Perform binary search over reduced range
+        i_E_low = binary_search(nuc % energy_0K(i_low:i_high), &
+             i_high - i_low + 1, E_low) + i_low - 1
       end if
 
       ! upper index
@@ -898,7 +929,15 @@ contains
       elseif (E_up > nuc % energy_0K(nuc % n_grid_0K)) then
         i_E_up = nuc % n_grid_0K - 1
       else
-        i_E_up = binary_search(nuc % energy_0K, nuc % n_grid_0K, E_up)
+        ! Determine bounding indices based on which equal log-spaced interval
+        ! the energy is in
+        u = int(log(E_up / 1.0e-11_8) / log_spacing)
+        i_low  = nuc % grid_index_0K(u)
+        i_high = nuc % grid_index_0K(u + 1) + 1
+
+        ! Perform binary search over reduced range
+        i_E_up = binary_search(nuc % energy_0K(i_low:i_high), &
+             i_high - i_low + 1, E_up) + i_low - 1
       end if
 
       ! interpolate xs CDF since we're not exactly at the energy indices
@@ -923,18 +962,17 @@ contains
 
       ! values used to sample the Maxwellian
       E_mode = kT
-      p_mode = TWO * sqrt(E_mode / pi) * sqrt((ONE / kT)**3) &
-        & * exp(-E_mode / kT)
+      p_mode = TWO * sqrt(E_mode / pi) * sqrt(kTn1*kTn1*kTn1) * exp(-ONE)
       E_t_max = 16.0_8 * E_mode
 
       reject = .true.
 
       do
+        r = prn()
 
         ! perform Maxwellian rejection sampling
-        E_t = E_t_max * prn()**2
-        p_t = TWO * sqrt(E_t / pi) * sqrt((ONE / kT)**3) &
-          & * exp(-E_t / kT)
+        E_t = E_t_max * (r * r)
+        p_t = TWO * sqrt(E_t / pi) * sqrt(kTn1*kTn1*kTn1) * exp(-E_t * kTn1)
         R_speed = p_t / p_mode
 
         if (prn() < R_speed) then

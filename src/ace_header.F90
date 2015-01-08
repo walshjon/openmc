@@ -101,7 +101,7 @@ module ace_header
 
     ! Energy grid information
     integer :: n_grid                     ! # of nuclide grid points
-    integer, allocatable :: grid_index(:) ! union grid pointers / log grid mapping
+    integer, allocatable :: grid_index(:) ! log grid mapping
     real(8), allocatable :: energy(:)     ! energy values corresponding to xs
 
     ! Microscopic cross sections
@@ -117,6 +117,7 @@ module ace_header
     character(10)        :: name_0K = '' ! name of 0K nuclide, e.g. 92235.00c
     character(16)        :: scheme ! target velocity sampling scheme
     integer              :: n_grid_0K ! number of 0K energy grid points
+    integer, allocatable :: grid_index_0K(:) ! 0 K elastic xs log map indices
     real(8), allocatable :: energy_0K(:)  ! energy grid for 0K xs
     real(8), allocatable :: elastic_0K(:) ! Microscopic elastic cross section
     real(8), allocatable :: xs_cdf(:) ! CDF of v_rel times cross section
@@ -375,6 +376,9 @@ module ace_header
       if (allocated(this % energy)) &
            deallocate(this % energy, this % total, this % elastic, &
            & this % fission, this % nu_fission, this % absorption)
+
+      if (allocated(this % grid_index_0K)) &
+           deallocate(this % grid_index_0K)
 
       if (allocated(this % energy_0K)) &
            deallocate(this % energy_0K)

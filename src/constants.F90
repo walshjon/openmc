@@ -365,7 +365,7 @@ module constants
 
   ! Energy grid methods
   integer, parameter :: &
-       GRID_NUCLIDE   = 1, & ! non-unionized energy grid
+       GRID_NUCLIDE   = 1, & ! single-nuclide energy grid
        GRID_LOGARITHM = 2    ! logarithmic mapping
 
   ! Running modes
